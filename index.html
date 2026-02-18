@@ -2,7 +2,8 @@
 <html lang="th">
 <head>
     <link rel="manifest" href="manifest.json">
-
+    
+    <meta name="theme-color" content="#2563eb">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SurveyPro">
@@ -498,7 +499,13 @@
             const j=dbJobs.find(x=>x.id===id); 
             if(j){ openSheet(j); document.getElementById('sheet').classList.add('minimized'); document.getElementById('search-results').classList.remove('active'); document.getElementById('inp-search').value=''; if(userMarker) map.fitBounds(L.latLngBounds([userMarker.getLatLng(), [j.lat, j.lng]]), {padding:[80,80]}); } 
         }
-
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('./service-worker.js')
+            .then(reg => console.log('PWA Ready!', reg))
+            .catch(err => console.log('PWA Failed', err));
+        });
+      }
     </script>
 </body>
 </html>
