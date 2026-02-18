@@ -9,7 +9,7 @@
     <meta name="apple-mobile-web-app-title" content="SurveyPro">
     <link rel="apple-touch-icon" href="icon.png">
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>Survey Solo Pro (Search Detail)</title>
     
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
@@ -30,7 +30,17 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
     <style>
-        body { font-family: 'Sarabun', sans-serif; overflow: hidden; background-color: #f3f4f6; }
+        body {
+            /* ป้องกันเนื้อหาถูกบังด้วยรอยบากและแถบด้านล่าง */
+            padding-top: env(safe-area-inset-top);
+            padding-bottom: env(safe-area-inset-bottom);
+            height: 100vh;
+        }
+        
+        #sheet {
+            /* สำหรับเครื่องที่มีแถบด้านล่าง ให้ขยับระยะขึ้นมานิดนึง */
+            padding-bottom: env(safe-area-inset-bottom);
+        }
         .map-full { position: absolute; top: 0; bottom: 0; width: 100%; z-index: 0; }
         
         #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
