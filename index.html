@@ -2,15 +2,15 @@
 <html lang="th">
 <head>
     <link rel="manifest" href="manifest.json">
-    
     <meta name="theme-color" content="#2563eb">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="SurveyPro">
-    <link rel="apple-touch-icon" href="icon.png">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/854/854878.png">
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Survey Solo Pro (Search Detail)</title>
+    <title>Survey Solo Pro (Complete)</title>
     
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -19,32 +19,28 @@
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    
-    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
-    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/tokml@0.4.0/tokml.js"></script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
     <style>
-        body {
-            /* ป้องกันเนื้อหาถูกบังด้วยรอยบากและแถบด้านล่าง */
-            padding-top: env(safe-area-inset-top);
-            padding-bottom: env(safe-area-inset-bottom);
-            height: 100vh;
+        :root { --safe-top: env(safe-area-inset-top); --safe-bottom: env(safe-area-inset-bottom); }
+        body { 
+            font-family: 'Sarabun', sans-serif; 
+            overflow: hidden; 
+            background-color: #f3f4f6; 
+            /* จัดการพื้นที่หน้าจอให้เต็มและหลบรอยบาก */
+            height: 100dvh; 
+            padding-top: var(--safe-top);
+            padding-bottom: var(--safe-bottom);
+            display: flex; flex-direction: column;
         }
         
-        #sheet {
-            /* สำหรับเครื่องที่มีแถบด้านล่าง ให้ขยับระยะขึ้นมานิดนึง */
-            padding-bottom: env(safe-area-inset-bottom);
-        }
-        .map-full { position: absolute; top: 0; bottom: 0; width: 100%; z-index: 0; }
+        .map-full { flex: 1; width: 100%; z-index: 0; }
         
-        #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 1000; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
-        .top-row { display: flex; gap: 8px; pointer-events: auto; }
+        #top-bar { position: absolute; top: calc(10px + var(--safe-top)); left: 10px; right: 10px; z-index: 1000; pointer-events: none; }
+        .top-row { display: flex; gap: 8px; pointer-events: auto; margin-bottom: 8px; }
         
         .control-btn { background: white; width: 45px; height: 45px; border-radius: 12px; display: flex; justify-content: center; align-items: center; box-shadow: 0 4px 10px rgba(0,0,0,0.15); cursor: pointer; font-size: 18px; color: #444; border: none; flex-shrink: 0; }
         .control-btn:active { transform: scale(0.95); background: #f0f0f0; }
@@ -59,32 +55,30 @@
         #status-bar { background: rgba(255, 255, 255, 0.95); border: 1px solid #ddd; padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; color: #333; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); cursor: pointer; }
         #job-counter { background: #10b981; color: white; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 5px; }
 
-        .fab-col { position: absolute; bottom: 30px; right: 10px; display: flex; flex-direction: column; gap: 12px; z-index: 900; transition: bottom 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
-        .fab-col.sheet-open { bottom: 170px; }
+        .fab-col { position: absolute; bottom: calc(30px + var(--safe-bottom)); right: 10px; display: flex; flex-direction: column; gap: 12px; z-index: 900; transition: 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+        .fab-col.sheet-open { bottom: calc(180px + var(--safe-bottom)); }
 
         .btn-fab { width: 55px; height: 55px; border-radius: 50%; background: white; color: #333; box-shadow: 0 4px 10px rgba(0,0,0,0.25); display: flex; justify-content: center; align-items: center; font-size: 22px; border: none; transition: 0.2s; cursor: pointer; }
-        .btn-fab:active { transform: scale(0.9); }
-        .btn-fab.active-gps { background: #2563eb !important; color: white !important; border: 3px solid white; box-shadow: 0 0 15px rgba(37, 99, 235, 0.6); }
+        .btn-fab.active-gps { background: #2563eb !important; color: white !important; }
 
         #sheet { 
             position: absolute; bottom: 0; left: 0; right: 0; 
             background: white; border-radius: 24px 24px 0 0; 
             transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
             z-index: 2000; max-height: 85vh; display: flex; flex-direction: column;
+            padding-bottom: var(--safe-bottom); /* ยกหลบแถบ iPhone */
             box-shadow: 0 -10px 40px rgba(0,0,0,0.2);
         }
         #sheet.active { transform: translateY(0); }
-        #sheet.minimized { transform: translateY(calc(100% - 145px)); }
+        #sheet.minimized { transform: translateY(calc(100% - 145px - var(--safe-bottom))); }
 
         .sheet-header { padding: 15px; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; background: white; border-radius: 24px 24px 0 0; flex-shrink: 0; cursor: pointer; }
         .sheet-controls { padding: 10px 15px; background: white; border-bottom: 1px solid #f0f0f0; flex-shrink: 0; }
         .sheet-content { padding: 15px; background: white; overflow-y: auto; flex: 1; }
 
-        .dimmed-layer { opacity: 0.2; fill-opacity: 0.1; stroke-opacity: 0.2; transition: all 0.5s; }
+        .dimmed-layer { opacity: 0.3; filter: grayscale(100%); }
         .leaflet-routing-container { display: none !important; }
         #loading-overlay { position: fixed; inset: 0; z-index: 9999; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); color: white; flex-direction: column; }
-        
-        .btn-disabled { background: #9ca3af !important; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -94,111 +88,117 @@
         <div id="loading-text">กำลังประมวลผล...</div>
     </div>
 
-    <div id="app-screen" class="h-screen w-full relative">
-        <div id="top-bar">
-            <div class="top-row justify-between items-center px-2">
-                <div id="status-bar" onclick="openToolsMenu()">
-                    <i class="fa-solid fa-user-gear text-blue-600"></i> 
-                    <span id="user-display">ตั้งค่า</span> 
-                    <span id="job-counter">0/0</span>
-                </div>
-                <div class="flex gap-2">
-                    <button class="control-btn text-purple-600" onclick="toggleViewMode()" id="btn-view">
-                        <i class="fa-solid fa-draw-polygon"></i>
-                    </button>
-                    <button class="control-btn text-gray-700" onclick="toggleBaseMap()">
-                        <i class="fa-solid fa-map"></i>
-                    </button>
-                </div>
+    <div id="top-bar">
+        <div class="top-row justify-between items-center px-2">
+            <div id="status-bar" onclick="openToolsMenu()">
+                <i class="fa-solid fa-user-gear text-blue-600"></i> 
+                <span id="user-display">ตั้งค่า</span> 
+                <span id="job-counter">0/0</span>
             </div>
-
-            <div class="top-row">
-                <button class="control-btn text-blue-600" onclick="document.getElementById('fileInput').click()">
-                    <i class="fa-solid fa-folder-open"></i>
+            <div class="flex gap-2">
+                <button class="control-btn text-purple-600" onclick="toggleViewMode()" id="btn-view">
+                    <i class="fa-solid fa-draw-polygon"></i>
                 </button>
-                <div class="search-group">
-                    <input type="text" id="inp-search" placeholder="ค้นหาชื่อ หรือ หมายเหตุ..." class="search-input" onkeyup="doSearch()">
-                    <select id="sel-amphoe" onchange="onAmphoeChange()" class="filter-select"><option value="">อ.ทั้งหมด</option></select>
-                    <select id="sel-tambon" onchange="filterMap()" class="filter-select"><option value="">ต.ทั้งหมด</option></select>
-                    <div id="search-results"></div>
-                </div>
+                <button class="control-btn text-gray-700" onclick="toggleBaseMap()">
+                    <i class="fa-solid fa-layer-group"></i>
+                </button>
             </div>
         </div>
 
-        <input type="file" id="fileInput" accept=".json,.geojson,.txt,*/*" class="hidden" onchange="importData(this)">
-        <div id="map" class="map-full"></div>
+        <div class="top-row">
+            <button class="control-btn text-blue-600" onclick="document.getElementById('fileInput').click()">
+                <i class="fa-solid fa-folder-open"></i>
+            </button>
+            <div class="search-group">
+                <input type="text" id="inp-search" placeholder="ค้นหาชื่อ หรือ หมายเหตุ..." class="search-input" onkeyup="doSearch()">
+                <select id="sel-amphoe" onchange="onAmphoeChange()" class="filter-select"><option value="">อ.ทั้งหมด</option></select>
+                <select id="sel-tambon" onchange="filterMap()" class="filter-select"><option value="">ต.ทั้งหมด</option></select>
+                <div id="search-results"></div>
+            </div>
+        </div>
+    </div>
 
-        <div id="fab-container" class="fab-col">
-            <button class="btn-fab bg-gray-800 text-white" onclick="openToolsMenu()"><i class="fa-solid fa-gear"></i></button>
-            <button class="btn-fab bg-blue-500 text-white" onclick="findNearestNewJob()"><i class="fa-solid fa-location-crosshairs"></i></button>
-            <button id="btn-gps" class="btn-fab bg-white text-blue-600" onclick="toggleGPSFollow()">
-                <i class="fa-solid fa-location-arrow"></i>
+    <input type="file" id="fileInput" accept=".json,.geojson,.txt,*/*" class="hidden" onchange="importData(this)">
+    <div id="map" class="map-full"></div>
+
+    <div id="fab-container" class="fab-col">
+        <button class="btn-fab bg-gray-800 text-white" onclick="openToolsMenu()"><i class="fa-solid fa-gear"></i></button>
+        <button class="btn-fab bg-blue-500 text-white" onclick="findNearestNewJob()"><i class="fa-solid fa-crosshairs"></i></button>
+        <button id="btn-gps" class="btn-fab bg-white text-blue-600" onclick="toggleGPSFollow()">
+            <i class="fa-solid fa-location-arrow"></i>
+        </button>
+    </div>
+
+    <div id="sheet">
+        <div class="sheet-header" onclick="toggleSheetSize()">
+            <div>
+                <h2 id="sheet-title" class="text-lg font-bold text-gray-800">รายละเอียด</h2>
+                <p id="sheet-meta" class="text-xs text-gray-500">-</p>
+            </div>
+            <button onclick="closeSheet(event)" class="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center hover:bg-red-100 hover:text-red-500">
+                <i class="fa-solid fa-times text-xl"></i>
             </button>
         </div>
 
-        <div id="sheet">
-            <div class="sheet-header" onclick="toggleSheetSize()">
-                <div>
-                    <h2 id="sheet-title" class="text-lg font-bold text-gray-800">รายละเอียด</h2>
-                    <p id="sheet-meta" class="text-xs text-gray-500">-</p>
-                </div>
-                <button onclick="closeSheet(event)" class="w-10 h-10 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center hover:bg-red-100 hover:text-red-500">
-                    <i class="fa-solid fa-times text-xl"></i>
+        <div class="sheet-controls">
+            <div class="grid grid-cols-2 gap-3">
+                <button onclick="navGoogle()" class="bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm">
+                    <i class="fab fa-google text-red-500"></i> Google Maps
+                </button>
+                
+                <button id="btn-nav-start" onclick="startNav()" class="bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md">
+                    <i class="fa-solid fa-route"></i> นำทาง
+                </button>
+                <button id="btn-nav-cancel" onclick="stopNav()" class="hidden bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md">
+                    <i class="fa-solid fa-stop-circle"></i> ยกเลิก
                 </button>
             </div>
+        </div>
 
-            <div class="sheet-controls">
-                <div class="grid grid-cols-2 gap-3">
-                    <button onclick="navGoogle()" class="bg-white border border-gray-200 text-gray-700 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-sm">
-                        <i class="fab fa-google text-red-500"></i> Google Maps
+        <div class="sheet-content">
+            <div class="space-y-4">
+                <div>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="text-xs font-bold text-gray-500 ml-1">ชื่อแปลง / เลขทะเบียน</label>
+                        <button onclick="viewJsonData()" class="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 border border-gray-200 transition">
+                            <i class="fa-solid fa-code"></i> ข้อมูลดิบ
+                        </button>
+                    </div>
+                    <input type="text" id="sheet-name" class="w-full p-3 border border-gray-300 rounded-xl bg-white outline-none focus:border-green-500 font-bold" disabled>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500 ml-1">รายละเอียด / หมายเหตุ</label>
+                    <textarea id="sheet-note" rows="4" class="w-full p-3 border border-gray-300 rounded-xl bg-white outline-none focus:border-green-500" disabled></textarea>
+                </div>
+                
+                <div id="action-buttons">
+                    <button id="btn-save" onclick="saveData()" class="w-full bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg text-lg flex items-center justify-center gap-2 hidden">
+                        <i class="fa-solid fa-save"></i> <span>บันทึกข้อมูล</span>
                     </button>
-                    
-                    <button id="btn-nav-start" onclick="startNav()" class="bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md">
-                        <i class="fa-solid fa-route"></i> นำทาง
-                    </button>
-                    <button id="btn-nav-cancel" onclick="stopNav()" class="hidden bg-red-500 hover:bg-red-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 shadow-md">
-                        <i class="fa-solid fa-stop-circle"></i> ยกเลิก
+                    <button id="btn-edit" onclick="enableEdit()" class="w-full bg-yellow-500 text-white py-4 rounded-xl font-bold shadow-lg text-lg flex items-center justify-center gap-2 hidden">
+                        <i class="fa-solid fa-pen-to-square"></i> <span>แก้ไขข้อมูล</span>
                     </button>
                 </div>
-            </div>
 
-            <div class="sheet-content">
-                <div class="space-y-4">
-                    <div>
-                        <div class="flex justify-between items-center mb-1">
-                            <label class="text-xs font-bold text-gray-500 ml-1">ชื่อแปลง / เลขทะเบียน</label>
-                            <button onclick="viewJsonData()" class="text-[10px] bg-gray-100 text-gray-600 px-2 py-1 rounded hover:bg-gray-200 border border-gray-200 transition">
-                                <i class="fa-solid fa-code"></i> ดูข้อมูลดิบ
-                            </button>
-                        </div>
-                        <input type="text" id="sheet-name" class="w-full p-3 border border-gray-300 rounded-xl bg-white outline-none focus:border-green-500 font-bold">
-                    </div>
-                    <div>
-                        <label class="text-xs font-bold text-gray-500 ml-1">รายละเอียด / หมายเหตุ</label>
-                        <textarea id="sheet-note" rows="4" class="w-full p-3 border border-gray-300 rounded-xl bg-white outline-none focus:border-green-500"></textarea>
-                    </div>
-                    <button id="btn-save" onclick="saveData()" class="w-full bg-green-600 text-white py-4 rounded-xl font-bold shadow-lg text-lg flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-save"></i> <span id="btn-save-text">บันทึกข้อมูล</span>
-                    </button>
-                    <button onclick="deleteJob()" class="w-full bg-red-50 text-red-500 py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2">
-                        <i class="fa-solid fa-trash-can"></i> ลบรายการนี้
-                    </button>
-                </div>
+                <button onclick="deleteJob()" class="w-full bg-red-50 text-red-500 py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-trash-can"></i> ลบรายการนี้
+                </button>
             </div>
         </div>
     </div>
 
     <script>
         // --- IndexedDB ---
-        const DB_NAME='SurveyDB_Final_V5'; const DB_VER=1; let db;
+        const DB_NAME='SurveyDB_Complete_V1'; const DB_VER=1; let db;
         function initDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,DB_VER); r.onupgradeneeded=(e)=>{if(!e.target.result.objectStoreNames.contains('jobs'))e.target.result.createObjectStore('jobs',{keyPath:'id'})}; r.onsuccess=(e)=>{db=e.target.result;res(db)}; r.onerror=()=>rej();});}
         function saveJobToDB(j){return new Promise((res,rej)=>{const t=db.transaction('jobs','readwrite'); t.objectStore('jobs').put(j); t.oncomplete=()=>res(); t.onerror=()=>rej();});}
+        function deleteJobFromDB(id){return new Promise((res,rej)=>{const t=db.transaction('jobs','readwrite'); t.objectStore('jobs').delete(id); t.oncomplete=()=>res(); t.onerror=()=>rej();});}
         function getAllJobs(){return new Promise((res)=>{if(!db)return res([]); const t=db.transaction('jobs','readonly'); const r=t.objectStore('jobs').getAll(); r.onsuccess=()=>res(r.result||[]); r.onerror=()=>res([]);});}
         function clearDB(){return new Promise((res)=>{const t=db.transaction('jobs','readwrite'); t.objectStore('jobs').clear(); t.oncomplete=()=>res();});}
 
         let map, userMarker, routingControl;
         let dbJobs=[], markersGroup=L.layerGroup();
-        let selectedJobId=null, currentUser={name:'Guest',category:'ทั่วไป'}, categories=['ทั่วไป','ตรวจสอบ','เร่งด่วน'];
+        let selectedJobId=null, currentUser={name:'นายช่าง',category:'ทั่วไป'}, categories=['ทั่วไป','ตรวจสอบ','เร่งด่วน'];
         let viewMode='original', isNavigating=false, isFollowing=false;
         let speechSynth = window.speechSynthesis;
         let navInterval = null;
@@ -209,7 +209,7 @@
         window.addEventListener('load', async()=>{
             showLoading(true,'โหลดระบบ...'); await initDB();
             try {
-                const p=localStorage.getItem('survey_profile_v15'); const c=localStorage.getItem('survey_cats_v15');
+                const p=localStorage.getItem('survey_profile_v16'); const c=localStorage.getItem('survey_cats_v16');
                 if(c) categories=JSON.parse(c); if(p) currentUser=JSON.parse(p);
                 dbJobs = await getAllJobs();
             } catch(e){ localStorage.clear(); }
@@ -220,7 +220,7 @@
 
         function initApp(){
             updateUserInfo();
-            map = L.map('map',{zoomControl:false}).setView([13.7,100.5],6);
+            map = L.map('map',{zoomControl:false, attributionControl: false}).setView([13.7,100.5],6);
             maps.hybrid.addTo(map); markersGroup.addTo(map);
             updateAmphoeDropdown(); renderMap(true); 
             
@@ -251,7 +251,6 @@
                 else Swal.fire('รอ GPS...','','info');
             } else btn.classList.remove('active-gps');
         }
-        function locateUser(follow) { if(follow) toggleGPSFollow(true); }
 
         function getFilteredJobs() {
             const search = document.getElementById('inp-search').value.toLowerCase();
@@ -299,10 +298,6 @@
         function startNav() {
             if(!userMarker) return Swal.fire('GPS ไม่พร้อม', '', 'warning');
             const job=dbJobs.find(j=>j.id===selectedJobId); if(!job)return;
-
-            const filtered = getFilteredJobs();
-            if(!filtered.find(j=>j.id===selectedJobId)) return Swal.fire('แปลงไม่อยู่ในรายการ', 'แปลงถูกกรองออก', 'warning');
-
             viewMode='pin'; document.getElementById('btn-view').innerHTML='<i class="fa-solid fa-map-pin"></i>';
             
             isNavigating=true; job.prevStatus=job.status; job.status='navigating'; renderMap();
@@ -319,7 +314,6 @@
                     createMarker:()=>null, lineOptions:{styles:[{color:'#2563eb',weight:6,opacity:0.9}]},
                     show:false, addWaypoints:false
                 }).addTo(map);
-                
                 speak("เริ่มการนำทาง");
                 if(navInterval) clearInterval(navInterval);
                 navInterval = setInterval(() => {
@@ -340,10 +334,8 @@
             isNavigating=false; 
             if(routingControl)try{map.removeControl(routingControl)}catch(e){} routingControl=null;
             if(navInterval) clearInterval(navInterval);
-
             document.getElementById('btn-nav-start').classList.remove('hidden');
             document.getElementById('btn-nav-cancel').classList.add('hidden');
-            
             const job=dbJobs.find(j=>j.id===selectedJobId); if(job)job.status=job.prevStatus||'done';
             renderMap();
         }
@@ -356,14 +348,18 @@
             document.getElementById('sheet-name').value=p.name||'';
             document.getElementById('sheet-note').value=p.note||'';
             
-            const saveBtn = document.getElementById('btn-save');
-            const saveText = document.getElementById('btn-save-text');
+            // Logic ปุ่ม Save/Edit
+            const btnSave = document.getElementById('btn-save');
+            const btnEdit = document.getElementById('btn-edit');
+            
             if(job.status === 'done') {
-                saveBtn.classList.add('btn-disabled');
-                saveText.innerText = 'บันทึกแล้ว';
+                btnSave.classList.add('hidden');
+                btnEdit.classList.remove('hidden');
+                toggleInputs(false); // ล็อกช่องพิมพ์
             } else {
-                saveBtn.classList.remove('btn-disabled');
-                saveText.innerText = 'บันทึกข้อมูล';
+                btnSave.classList.remove('hidden');
+                btnEdit.classList.add('hidden');
+                toggleInputs(true); // ปลดล็อก
             }
 
             document.getElementById('fab-container').classList.add('sheet-open');
@@ -371,6 +367,17 @@
             document.getElementById('sheet').classList.add('active');
             
             if(!isNavigating) map.flyTo([job.lat,job.lng],16);
+        }
+
+        function toggleInputs(enabled) {
+            document.getElementById('sheet-name').disabled = !enabled;
+            document.getElementById('sheet-note').disabled = !enabled;
+        }
+
+        function enableEdit() {
+            toggleInputs(true);
+            document.getElementById('btn-save').classList.remove('hidden');
+            document.getElementById('btn-edit').classList.add('hidden');
         }
 
         function closeSheet(e) {
@@ -388,7 +395,6 @@
             if(!userMarker) return Swal.fire('รอ GPS','','info');
             const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done');
             if(filteredJobs.length===0) return Swal.fire('เยี่ยม','ไม่มีงานค้างในพื้นที่นี้','success');
-
             let min=Infinity, near=null; const u=userMarker.getLatLng();
             filteredJobs.forEach(j=>{ const d=map.distance(u,[j.lat,j.lng]); if(d<min){min=d; near=j;} });
             if(near) { 
@@ -448,21 +454,31 @@
             const job=dbJobs.find(j=>j.id===selectedJobId);
             if(job){
                 if(isNavigating) stopNav();
-
                 job.status='done'; 
                 job.properties.name=document.getElementById('sheet-name').value;
                 job.properties.note=document.getElementById('sheet-note').value;
                 job.properties.date=new Date().toISOString().split('T')[0];
-                
                 await saveJobToDB(job); 
                 renderMap();
-                
                 closeSheet();
                 Swal.fire({toast:true,icon:'success',title:'บันทึกแล้ว',timer:1000,showConfirmButton:false});
             }
         }
-        function deleteJob(){ dbJobs=dbJobs.filter(j=>j.id!==selectedJobId); saveData().then(()=>closeSheet()); }
+
+        // --- แก้ไข: ลบแล้วหมุดหายทันที ---
+        function deleteJob(){ 
+            Swal.fire({title:'ลบรายการนี้?', text:'ข้อมูลจะหายไปถาวร', icon:'warning', showCancelButton:true, confirmButtonColor:'#ef4444'}).then(async(r)=>{
+                if(r.isConfirmed){
+                    await deleteJobFromDB(selectedJobId); // ลบจาก DB
+                    dbJobs=dbJobs.filter(j=>j.id!==selectedJobId); // ลบจาก RAM
+                    renderMap(); // วาดใหม่
+                    closeSheet();
+                }
+            });
+        }
+        
         function navGoogle() { const j=dbJobs.find(x=>x.id===selectedJobId); window.open(`https://www.google.com/maps/dir/?api=1&destination=${j.lat},${j.lng}`, '_blank'); }
+        
         function updateAmphoeDropdown(){
             const s=new Set(); dbJobs.filter(j=>j.category===currentUser.category).forEach(j=>{const a=j.properties.amphoe||j.properties.AMPH_NAME; if(a)s.add(a)});
             const el=document.getElementById('sel-amphoe'); el.innerHTML='<option value="">อ.ทั้งหมด</option>';
@@ -479,12 +495,46 @@
         function filterMap(){ renderMap(true); }
         function toggleViewMode(){ viewMode=viewMode==='original'?'pin':'original'; document.getElementById('btn-view').innerHTML=viewMode==='pin'?'<i class="fa-solid fa-map-pin"></i>':'<i class="fa-solid fa-draw-polygon"></i>'; renderMap(); }
         function toggleBaseMap(){ map.removeLayer(maps[currentBaseMap]); currentBaseMap=currentBaseMap==='hybrid'?'street':'hybrid'; map.addLayer(maps[currentBaseMap]); }
+        
+        // --- แก้ไข: เพิ่มปุ่มปิด (X) ในหน้าตั้งค่า ---
         function openToolsMenu(){ 
             let catOptions=''; categories.forEach(c=>{catOptions+=`<option value="${c}" ${c===currentUser.category?'selected':''}>${c}</option>`});
-            Swal.fire({title:'ตั้งค่า', html:`<div class="text-left space-y-3"><div class="p-3 border rounded bg-gray-50"><label class="text-xs">ชื่อ</label><input id="set-name" class="w-full border p-1" value="${currentUser.name}"><label class="text-xs mt-2 block">หมวดงาน</label><div class="flex gap-2"><select id="set-cat" class="w-full border p-1 rounded">${catOptions}</select><button onclick="addCat()" class="bg-gray-200 px-2">+</button></div></div><button onclick="clearAll()" class="w-full text-red-600 border p-2 bg-red-50 text-xs font-bold">ล้างข้อมูล</button><div class="p-3 border rounded border-blue-200 bg-blue-50 text-center"><label class="text-xs">ส่งออก</label><div class="flex justify-center gap-2 mt-1"><button onclick="doExport('xlsx')" class="bg-green-600 text-white px-2 py-1 rounded text-xs">Excel</button><button onclick="doExport('kml')" class="bg-blue-600 text-white px-2 py-1 rounded text-xs">KML</button></div></div></div>`, showConfirmButton:true, confirmButtonText:'บันทึก', preConfirm:()=>{ currentUser.name=document.getElementById('set-name').value; currentUser.category=document.getElementById('set-cat').value; localStorage.setItem('survey_profile_v15',JSON.stringify(currentUser)); updateUserInfo(); updateAmphoeDropdown(); renderMap(); } });
+            Swal.fire({
+                title:'ตั้งค่า', 
+                html:`
+                <button onclick="Swal.close()" class="absolute top-3 right-4 text-gray-400 text-2xl">×</button>
+                <div class="text-left space-y-3 pt-4">
+                    <div class="p-3 border rounded bg-gray-50">
+                        <label class="text-xs">ชื่อ</label>
+                        <input id="set-name" class="w-full border p-1" value="${currentUser.name}">
+                        <label class="text-xs mt-2 block">หมวดงาน</label>
+                        <div class="flex gap-2">
+                            <select id="set-cat" class="w-full border p-1 rounded">${catOptions}</select>
+                            <button onclick="addCat()" class="bg-gray-200 px-2">+</button>
+                        </div>
+                    </div>
+                    <button onclick="clearAll()" class="w-full text-red-600 border p-2 bg-red-50 text-xs font-bold">ล้างข้อมูล</button>
+                    <div class="p-3 border rounded border-blue-200 bg-blue-50 text-center">
+                        <label class="text-xs">ส่งออก</label>
+                        <div class="flex justify-center gap-2 mt-1">
+                            <button onclick="doExport('xlsx')" class="bg-green-600 text-white px-2 py-1 rounded text-xs">Excel</button>
+                            <button onclick="doExport('kml')" class="bg-blue-600 text-white px-2 py-1 rounded text-xs">KML</button>
+                        </div>
+                    </div>
+                </div>`, 
+                showConfirmButton:true, 
+                confirmButtonText:'บันทึก', 
+                preConfirm:()=>{ 
+                    currentUser.name=document.getElementById('set-name').value; 
+                    currentUser.category=document.getElementById('set-cat').value; 
+                    localStorage.setItem('survey_profile_v16',JSON.stringify(currentUser)); 
+                    updateUserInfo(); updateAmphoeDropdown(); renderMap(); 
+                } 
+            });
         }
-        function addCat(){ Swal.fire({input:'text',title:'เพิ่มหมวด'}).then(r=>{if(r.value){categories.push(r.value); localStorage.setItem('survey_cats_v15',JSON.stringify(categories)); Swal.close(); openToolsMenu(); }}); }
-        function clearAll(){ Swal.fire({title:'ล้าง?',showCancelButton:true,confirmButtonColor:'red'}).then(async(r)=>{if(r.isConfirmed){await clearDB(); dbJobs=[]; renderMap(); Swal.fire('ล้างแล้ว','','success');}});}
+
+        function addCat(){ Swal.fire({input:'text',title:'เพิ่มหมวด'}).then(r=>{if(r.value){categories.push(r.value); localStorage.setItem('survey_cats_v16',JSON.stringify(categories)); Swal.close(); openToolsMenu(); }}); }
+        function clearAll(){ Swal.fire({title:'ยืนยันล้าง?',text:'ข้อมูลทั้งหมดจะหายไป', icon:'warning', showCancelButton:true,confirmButtonColor:'red'}).then(async(r)=>{if(r.isConfirmed){await clearDB(); dbJobs=[]; renderMap(); Swal.fire('ล้างแล้ว','','success');}});}
         function doExport(type){ const data=dbJobs.filter(j=>j.category===currentUser.category && j.status==='done'); if(data.length===0)return Swal.fire('ไม่มีข้อมูลที่เสร็จ','','warning'); const f=`SURVEY_${currentUser.category}`; if(type==='xlsx'){const r=data.map(j=>({ID:j.id,Name:j.properties.name,Note:j.properties.note})); const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(r),"Data"); XLSX.writeFile(wb,f+'.xlsx');} if(type==='kml'){const g={type:"FeatureCollection",features:data.map(j=>({type:"Feature",properties:{name:j.properties.name},geometry:j.geometry}))}; download(tokml(g),f+'.kml','application/vnd.google-earth.kml+xml');} }
         function download(c,n,m){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([c],{type:m})); a.download=n; a.click(); }
         
@@ -509,13 +559,13 @@
             const j=dbJobs.find(x=>x.id===id); 
             if(j){ openSheet(j); document.getElementById('sheet').classList.add('minimized'); document.getElementById('search-results').classList.remove('active'); document.getElementById('inp-search').value=''; if(userMarker) map.fitBounds(L.latLngBounds([userMarker.getLatLng(), [j.lat, j.lng]]), {padding:[80,80]}); } 
         }
-    if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./service-worker.js')
-            .then(reg => console.log('PWA Ready!', reg))
-            .catch(err => console.log('PWA Failed', err));
-        });
-      }
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+              navigator.serviceWorker.register('./service-worker.js')
+                .then(reg => console.log('PWA Ready!', reg))
+                .catch(err => console.log('PWA Failed', err));
+            });
+        }
     </script>
 </body>
 </html>
