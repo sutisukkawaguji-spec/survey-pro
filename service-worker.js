@@ -1,4 +1,4 @@
-const CACHE_NAME = 'Smart Survey-v1';
+const CACHE_NAME = 'Smart-Survey-v1';
 const urlsToCache = [
   './',
   './index.html',
