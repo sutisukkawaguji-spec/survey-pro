@@ -500,11 +500,24 @@ function getFilteredJobs() {
         const txt = search;
 
         let matchS = txt === "";
+
         if (!matchS) {
-            // เช็กข้อมูลจาก 3 ส่วน: ID ป้าย (name), ช่องเชื่อมโยง (search_field) และ หมายเหตุ (note)
-            if ((p.name || "").toString().toLowerCase().includes(txt) ||
-                (p.search_field || "").toString().toLowerCase().includes(txt) ||
-                (p.note || "").toString().toLowerCase().includes(txt)) {
+            // =========================================================
+            // 🎯 กำหนดจุดค้นหาตรงนี้ (ผมแยกตัวแปรมาให้ดูและแก้ง่ายๆ ครับ)
+            // =========================================================
+
+            // 1. ค้นหาจาก ไอดี / ชื่อแปลง (หมวด 0)
+            const findName = (p.name || "").toString().toLowerCase().includes(txt);
+
+            // 2. ค้นหาจาก ช่องเชื่อมโยงค้นหา (หมวด 1)
+            const findSearchField = (p.search_field || "").toString().toLowerCase().includes(txt);
+
+            // 3. ค้นหาจาก หมายเหตุ (note)
+            const findNote = (p.note || "").toString().toLowerCase().includes(txt);
+
+            // ถ้าเจอคำค้นหาในช่องใดช่องหนึ่ง ให้ถือว่าค้นหาเจอ 
+            // (ถ้าคุณไม่อยากให้หาในหมายเหตุ ให้ลบ || findNote ออกได้เลยครับ)
+            if (findName || findSearchField || findNote) {
                 matchS = true;
             }
         }
@@ -2064,13 +2077,18 @@ function doSearch() {
     else res.classList.remove('active');
 
     hits.slice(0, 10).forEach(j => {
-        const name = j.properties.name || '(ไม่มีชื่อ)';
+        const name = j.properties.name || '(ไม่มีชื่อแปลง)';
+        const searchField = j.properties.search_field || ''; // 🎯 ดึงข้อมูลช่องเชื่อมโยงมาด้วย
         const note = j.properties.note || '';
+
         res.innerHTML += `
-                    <div class="p-3 border-b cursor-pointer hover:bg-gray-50" onclick="openSheetFromSearch('${j.id}')">
-                        <div class="text-sm font-bold text-gray-800">${name}</div>
-                        ${note ? `<div class="text-xs text-gray-500 truncate">${note}</div>` : ''}
-                    </div>`;
+            <div class="p-3 border-b cursor-pointer hover:bg-gray-50" onclick="openSheetFromSearch('${j.id}')">
+                <div class="text-sm font-bold text-gray-800">${name}</div>
+                
+                ${searchField ? `<div class="text-xs font-bold text-blue-600 mt-0.5"><i class="fa-solid fa-magnifying-glass text-[10px]"></i> ${searchField}</div>` : ''}
+                
+                ${note ? `<div class="text-[10px] text-gray-500 truncate mt-0.5">${note}</div>` : ''}
+            </div>`;
     });
 }
 
