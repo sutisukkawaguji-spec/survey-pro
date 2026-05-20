@@ -2291,21 +2291,42 @@ async function deleteJobImage(idx) {
         cancelButtonText: 'ยกเลิก'
     }).then(async (r) => {
         if (r.isConfirmed) {
-            // Try to delete from Cloudinary using delete_token
-            if (img.public_id) { // เปลี่ยนไปใช้ public_id ส่งไปลบหลังบ้าน
+            showLoading(true, 'กำลังส่งคำสั่งลบ...'); // เพิ่มโหลดดิ้งกันเหนียว
+
+            if (img.public_id) {
                 try {
+                    // ⚠️ วาง URL ของ Google Apps Script ที่ช่องนี้
                     const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYmkufBM6TGiY0TwSqI-Eq6RrTZBevQZqaBbs9IPZsAyBypBFXfvsXojkeVKcaoskb/exec";
-                    await fetch(GAS_WEBAPP_URL, {
+
+                    const response = await fetch(GAS_WEBAPP_URL, {
                         method: 'POST',
-                        body: JSON.stringify({ publicId: img.public_id }) // ส่งค่าไปให้สคริปต์ลบให้
+                        body: JSON.stringify({ publicId: img.public_id })
                     });
+
+                    const data = await response.json(); // อ่านผลลัพธ์ที่ตอบกลับมา
+
+                    // เช็กว่า Cloudinary ยอมให้ลบไหม
+                    if (data.success && data.result && data.result.result === "ok") {
+                        // ถ้าลบสำเร็จ ให้เคลียร์รูปออกจากหน้าจอ
+                        job.properties.images.splice(idx, 1);
+                        renderImageGallery(job.properties.images, true);
+                        Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปออกจากระบบและคลาวด์แล้ว', timer: 1500, showConfirmButton: false });
+                    } else {
+                        // 🚨 ถ้าลบไม่สำเร็จ จะมี Popup สีแดงเด้งบอกสาเหตุตรงนี้เลย!
+                        Swal.fire('Cloudinary ปฏิเสธการลบ', JSON.stringify(data), 'error');
+                    }
                 } catch (e) {
-                    console.error("GAS Cloudinary delete failed", e);
+                    console.error("เชื่อมต่อระบบล้มเหลว", e);
+                    Swal.fire('เชื่อมต่อหลังบ้านล้มเหลว', e.message, 'error');
                 }
+            } else {
+                // กรณีเป็นรูปเก่าที่ไม่มี public_id (ลบแค่ในระบบหน้าจอ)
+                job.properties.images.splice(idx, 1);
+                renderImageGallery(job.properties.images, true);
+                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปถ่ายแล้ว', timer: 1500, showConfirmButton: false });
             }
-            job.properties.images.splice(idx, 1);
-            renderImageGallery(job.properties.images, true);
-            Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปถ่ายแล้ว', timer: 1500, showConfirmButton: false });
+
+            showLoading(false); // ปิดโหลดดิ้ง
         }
     });
 }
