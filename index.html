@@ -433,6 +433,17 @@
 
         .swal2-container {
             z-index: 99999 !important;
+            -webkit-overflow-scrolling: touch !important;
+        }
+        .swal2-container.swal2-hidden {
+            display: none !important;
+            pointer-events: none !important;
+        }
+        .swal2-container:not(.swal2-shown) {
+            pointer-events: none !important;
+        }
+        body.swal2-shown {
+            overflow: hidden !important;
         }
 
         @keyframes pulseNavigating {

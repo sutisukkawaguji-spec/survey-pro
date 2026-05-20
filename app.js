@@ -284,6 +284,19 @@
         let speechSynth = window.speechSynthesis;
         let navInterval = null;
 
+        // Override Swal.fire to prevent overlapping/frozen alerts, especially on iOS Safari
+        if (window.Swal) {
+            const originalSwalFire = Swal.fire;
+            Swal.fire = function(...args) {
+                try {
+                    if (Swal.isVisible()) {
+                        Swal.close();
+                    }
+                } catch (e) {}
+                return originalSwalFire.apply(Swal, args);
+            };
+        }
+
         let showPinLabels = localStorage.getItem('survey_show_labels') !== 'false';
         const cloudinaryCloudName = 'dsi3g3dix';
         const cloudinaryUploadPreset = 'survey-extrapro';
@@ -449,19 +462,35 @@
         }
 
         function getFilteredJobs() {
-            const search = document.getElementById('inp-search').value.toLowerCase();
+            const search = document.getElementById('inp-search').value.toLowerCase().trim();
             const amphoe = document.getElementById('sel-amphoe').value;
             const tambon = document.getElementById('sel-tambon').value;
             return dbJobs.filter(j => {
                 const matchCat = j.category === currentUser.category;
-                const p = j.properties;
+                const p = j.properties || {};
                 const txt = search;
-                const matchS = txt === "" || 
-                    (p.name || "").toString().toLowerCase().includes(txt) || 
-                    (p.note || "").toString().toLowerCase().includes(txt) ||
-                    (p.search_field || "").toString().toLowerCase().includes(txt);
-                const matchA = amphoe === "" || (p.amphoe || p.AMPH_NAME) == amphoe;
-                const matchT = tambon === "" || (p.tambon || p.TUMB_NAME) == tambon;
+                
+                let matchS = txt === "";
+                if (!matchS) {
+                    if ((p.name || "").toString().toLowerCase().includes(txt) || 
+                        (p.note || "").toString().toLowerCase().includes(txt) ||
+                        (p.search_field || "").toString().toLowerCase().includes(txt)) {
+                        matchS = true;
+                    } else {
+                        // ค้นหาในทุกคีย์ของคุณสมบัติทั้งหมด (ตรวจจับฟิลด์ที่นำเข้ามาเพิ่มความยืดหยุ่น)
+                        for (let key in p) {
+                            if (p[key] && typeof p[key] !== 'object' && p[key].toString().toLowerCase().includes(txt)) {
+                                matchS = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                const valA = (p.amphoe || p.AMPH_NAME || p.AMPHOE || p.district || "").toString().trim();
+                const valT = (p.tambon || p.TUMB_NAME || p.TAMBON || p.subdistrict || "").toString().trim();
+                const matchA = amphoe === "" || valA === amphoe;
+                const matchT = tambon === "" || valT === tambon;
                 return matchCat && matchS && matchA && matchT;
             });
         }
@@ -565,6 +594,40 @@
             if (!userMarker) return Swal.fire('GPS ไม่พร้อม', '', 'warning');
             const job = dbJobs.find(j => j.id === selectedJobId);
             if (!job) return;
+
+            // ตรวจสอบคิวความขัดแย้งการล๊อกเป้าหมายชนกัน (Concurrency lock check)
+            if (supabaseClient && currentUser) {
+                showLoading(true, 'กำลังตรวจสอบคิวการเดินทาง...');
+                try {
+                    const { data, error } = await supabaseClient
+                        .from('jobs')
+                        .select('status, properties')
+                        .eq('id', job.id)
+                        .maybeSingle();
+
+                    if (!error && data) {
+                        const dbStatus = data.status;
+                        const dbProps = data.properties || {};
+                        if (dbStatus === 'navigating' && dbProps.navigator_id && dbProps.navigator_id !== currentUser.id) {
+                            showLoading(false);
+                            Swal.fire({
+                                title: 'มีเพื่อนร่วมทีมกำลังเดินทางแล้ว',
+                                text: `${dbProps.navigator_name || 'เพื่อนร่วมทีม'} ได้สิทธิ์เดินทางไปที่แปลงนี้ก่อนหน้าคุณแล้ว`,
+                                icon: 'warning',
+                                confirmButtonText: 'ตกลง'
+                            });
+                            // ปิดหน้าต่างและซิงค์ใหม่
+                            closeSheet();
+                            await syncJobsSilently();
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.error("Concurrent navigation check failed", err);
+                } finally {
+                    showLoading(false);
+                }
+            }
 
             viewMode = 'pin';
             document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-map-pin"></i>';
@@ -896,6 +959,7 @@
         let onConfirmImportCallback = null;
 
         function showFieldMapping(feats, onConfirm) {
+            closeSettingsModal();
             tempImportFeatures = feats;
             onConfirmImportCallback = onConfirm;
 
@@ -1023,17 +1087,19 @@
                                 }
                             }
 
-                            const idValue = mapping.idKey ? p[mapping.idKey] : null;
+                            const idRaw = mapping.idKey && p[mapping.idKey] !== undefined && p[mapping.idKey] !== null ? p[mapping.idKey] : '';
+                            const idValue = idRaw.toString().trim();
                             const nameVal = idValue || 'นำเข้า';
-                            const searchVal = mapping.searchKey ? p[mapping.searchKey] : '';
-                            const amphoeVal = mapping.amphoeKey ? p[mapping.amphoeKey] : '';
-                            const tambonVal = mapping.tambonKey ? p[mapping.tambonKey] : '';
-                            const areaVal = mapping.areaKey ? p[mapping.areaKey] : '';
+                            const searchVal = mapping.searchKey && p[mapping.searchKey] !== undefined && p[mapping.searchKey] !== null ? p[mapping.searchKey].toString().trim() : '';
+                            const amphoeVal = mapping.amphoeKey && p[mapping.amphoeKey] !== undefined && p[mapping.amphoeKey] !== null ? p[mapping.amphoeKey].toString().trim() : '';
+                            const tambonVal = mapping.tambonKey && p[mapping.tambonKey] !== undefined && p[mapping.tambonKey] !== null ? p[mapping.tambonKey].toString().trim() : '';
+                            const areaVal = mapping.areaKey && p[mapping.areaKey] !== undefined && p[mapping.areaKey] !== null ? p[mapping.areaKey].toString().trim() : '';
 
                             // Check duplicate first to keep status/notes/photos if already exists
-                            const existing = dbJobs.find(x => x.id === idValue);
+                            const finalId = idValue || 'IMP-' + Math.random().toString(36).substr(2, 9);
+                            const existing = dbJobs.find(x => x.id === finalId);
                             const job = {
-                                id: idValue || 'IMP-' + Math.random().toString(36).substr(2, 9),
+                                id: finalId,
                                 lat,
                                 lng,
                                 geometry: geom,
@@ -1185,7 +1251,8 @@
         function updateAmphoeDropdown() {
             const s = new Set();
             dbJobs.filter(j => j.category === currentUser.category).forEach(j => {
-                const a = j.properties.amphoe || j.properties.AMPH_NAME;
+                const p = j.properties || {};
+                const a = (p.amphoe || p.AMPH_NAME || p.AMPHOE || p.district || "").toString().trim();
                 if (a) s.add(a);
             });
             const el = document.getElementById('sel-amphoe');
@@ -1197,8 +1264,13 @@
         function onAmphoeChange() {
             const v = document.getElementById('sel-amphoe').value;
             const s = new Set();
-            dbJobs.filter(j => j.category === currentUser.category && (j.properties.amphoe || j.properties.AMPH_NAME) === v).forEach(j => {
-                const t = j.properties.tambon || j.properties.TUMB_NAME;
+            dbJobs.filter(j => {
+                const p = j.properties || {};
+                const a = (p.amphoe || p.AMPH_NAME || p.AMPHOE || p.district || "").toString().trim();
+                return j.category === currentUser.category && a === v;
+            }).forEach(j => {
+                const p = j.properties || {};
+                const t = (p.tambon || p.TUMB_NAME || p.TAMBON || p.subdistrict || "").toString().trim();
                 if (t) s.add(t);
             });
             const el = document.getElementById('sel-tambon');
@@ -1484,17 +1556,19 @@
                             }
                         }
 
-                        const idValue = mapping.idKey ? p[mapping.idKey] : null;
+                        const idRaw = mapping.idKey && p[mapping.idKey] !== undefined && p[mapping.idKey] !== null ? p[mapping.idKey] : '';
+                        const idValue = idRaw.toString().trim();
                         const nameVal = idValue || 'นำเข้า';
-                        const searchVal = mapping.searchKey ? p[mapping.searchKey] : '';
-                        const amphoeVal = mapping.amphoeKey ? p[mapping.amphoeKey] : '';
-                        const tambonVal = mapping.tambonKey ? p[mapping.tambonKey] : '';
-                        const areaVal = mapping.areaKey ? p[mapping.areaKey] : '';
+                        const searchVal = mapping.searchKey && p[mapping.searchKey] !== undefined && p[mapping.searchKey] !== null ? p[mapping.searchKey].toString().trim() : '';
+                        const amphoeVal = mapping.amphoeKey && p[mapping.amphoeKey] !== undefined && p[mapping.amphoeKey] !== null ? p[mapping.amphoeKey].toString().trim() : '';
+                        const tambonVal = mapping.tambonKey && p[mapping.tambonKey] !== undefined && p[mapping.tambonKey] !== null ? p[mapping.tambonKey].toString().trim() : '';
+                        const areaVal = mapping.areaKey && p[mapping.areaKey] !== undefined && p[mapping.areaKey] !== null ? p[mapping.areaKey].toString().trim() : '';
 
                         // Check duplicate first
-                        const existing = dbJobs.find(x => x.id === idValue);
+                        const finalId = idValue || 'GD-' + Math.random().toString(36).substr(2, 9);
+                        const existing = dbJobs.find(x => x.id === finalId);
                         const job = {
-                            id: idValue || 'GD-' + Math.random().toString(36).substr(2, 9),
+                            id: finalId,
                             lat,
                             lng,
                             geometry: geom,
