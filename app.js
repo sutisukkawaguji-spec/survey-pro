@@ -345,6 +345,22 @@
             startGpsTracking();
 
             map.on('dragstart', () => { if (isFollowing) toggleGPSFollow(false); });
+            map.on('click', () => {
+                const res = document.getElementById('search-results');
+                if (res) res.classList.remove('active');
+                if (!isNavigating && selectedJobId) {
+                    closeSheet();
+                }
+            });
+
+            // Close search results when clicking outside
+            document.addEventListener('click', (e) => {
+                const searchInp = document.getElementById('inp-search');
+                const searchRes = document.getElementById('search-results');
+                if (searchInp && searchRes && !searchInp.contains(e.target) && !searchRes.contains(e.target)) {
+                    searchRes.classList.remove('active');
+                }
+            });
 
             // Initialize label toggle button visual state
             const btn = document.getElementById('btn-label');
@@ -503,35 +519,23 @@
                 let layer;
                 let color = job.status === 'done' ? '#10b981' : (job.status === 'navigating' ? '#f97316' : '#ef4444');
                 let fill = job.status === 'done' ? 0.4 : 0.2;
-                if (viewMode === 'original' && job.geometry && (job.geometry.type.includes('Polygon'))) {
-                    layer = L.geoJSON(job.geometry, { style: { color: color, weight: 2, fillOpacity: fill } });
-                } else {
-                    let iconUrl = job.status === 'done'
-                        ? 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png'
-                        : 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png';
-                    if (job.status === 'navigating') {
-                        iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png';
-                    }
-                    layer = L.marker([job.lat, job.lng], {
-                        icon: L.icon({ iconUrl, iconSize: [25, 41], iconAnchor: [12, 41] })
-                    });
-                }
-                if (layer) {
-                    layer.jobId = job.id;
-                    if (job.status === 'navigating') {
-                        layer.on('add', () => {
-                            if (typeof layer.getElement === 'function') {
-                                layer.getElement()?.classList.add('job-navigating-pulse');
-                            }
-                            if (typeof layer.eachLayer === 'function') {
-                                layer.eachLayer(sub => {
-                                    if (typeof sub.getElement === 'function') {
-                                        sub.getElement()?.classList.add('job-navigating-pulse');
-                                    }
-                                });
-                            }
+                    if (viewMode === 'original' && job.geometry && (job.geometry.type.includes('Polygon'))) {
+                        layer = L.geoJSON(job.geometry, { style: { color: color, weight: 2, fillOpacity: fill, className: job.status === 'navigating' ? 'job-navigating-pulse' : '' } });
+                    } else {
+                        let iconUrl = job.status === 'done'
+                            ? 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png'
+                            : 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png';
+                        let mClassName = '';
+                        if (job.status === 'navigating') {
+                            iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png';
+                            mClassName = 'job-navigating-pulse';
+                        }
+                        layer = L.marker([job.lat, job.lng], {
+                            icon: L.icon({ iconUrl, iconSize: [25, 41], iconAnchor: [12, 41], className: mClassName })
                         });
                     }
+                    if (layer) {
+                        layer.jobId = job.id;
                     if (isNavigating && job.id !== selectedJobId) {
                         layer.on('add', () => {
                             if (typeof layer.getElement === 'function') {
@@ -724,6 +728,9 @@
             if (document.getElementById('sheet-area')) {
                 document.getElementById('sheet-area').value = p.area || '-';
             }
+            if (document.getElementById('sheet-source')) {
+                document.getElementById('sheet-source').value = p.import_source || '-';
+            }
 
             const btnSave = document.getElementById('btn-save');
             const btnEdit = document.getElementById('btn-edit');
@@ -752,7 +759,12 @@
             } else {
                 // Not locked by others
                 if (navWarning) navWarning.classList.add('hidden');
-                if (btnDelete) btnDelete.classList.remove('hidden');
+                
+                // Hide delete button if it's not done (i.e. waiting/navigating)
+                if (btnDelete) {
+                    if (isDone) btnDelete.classList.remove('hidden');
+                    else btnDelete.classList.add('hidden');
+                }
 
                 if (isDone) {
                     btnSave.classList.add('hidden');
@@ -1108,6 +1120,7 @@
                                 properties: {
                                     ...p,
                                     name: nameVal,
+                                    import_source: f.name || 'อัปโหลดไฟล์',
                                     note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
                                     images: existing ? existing.properties.images : [],
                                     search_field: searchVal,
@@ -1505,22 +1518,21 @@
             });
         }
 
-        // --- Google Drive Direct Download URL & Import GeoJSON ---
-        function getGoogleDriveDirectLink(url) {
-            // ตรวจหา ID จากลิงก์ปกติหรือลิงก์ที่มี id=
-            const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-            if (match && match[1]) {
-                return `https://docs.google.com/uc?export=download&id=${match[1]}`;
+        // --- Dropbox Direct Download URL & Import GeoJSON ---
+        function getDropboxDirectLink(url) {
+            // Check for Dropbox link and convert to raw download link
+            if (url.includes('dropbox.com')) {
+                return url.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace('?dl=0', '');
             }
             return url;
         }
 
-        async function importFromGoogleDriveLink() {
+        async function importFromCloudLink() {
             const url = document.getElementById('set-geojson-drive-url').value.trim();
-            if (!url) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาวางลิงก์แชร์ของ Google Drive', 'warning');
+            if (!url) return Swal.fire('ข้อมูลไม่ครบ', 'กรุณาวางลิงก์แชร์ของ Dropbox', 'warning');
 
-            const directUrl = getGoogleDriveDirectLink(url);
-            showLoading(true, 'กำลังเชื่อมโยงและดาวน์โหลดข้อมูลจาก Google Drive...');
+            const directUrl = getDropboxDirectLink(url);
+            showLoading(true, 'กำลังเชื่อมโยงและดาวน์โหลดข้อมูลจาก Dropbox...');
             try {
                 localStorage.setItem('survey_geojson_drive_url', url);
 
@@ -1577,6 +1589,7 @@
                             properties: {
                                 ...p,
                                 name: nameVal,
+                                import_source: url,
                                 note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
                                 images: existing ? existing.properties.images : [],
                                 search_field: searchVal,
@@ -1657,10 +1670,12 @@
 
         function getDatesWithData() {
             const data = dbJobs.filter(j => j.category === currentUser.category && j.status === 'done');
-            const dates = new Set();
+            const dates = new Map();
             data.forEach(j => {
                 const d = j.properties.date || (j.updated_at ? j.updated_at.split('T')[0] : '');
-                if (d) dates.add(d);
+                if (d) {
+                    dates.set(d, (dates.get(d) || 0) + 1);
+                }
             });
             return dates;
         }
@@ -1687,6 +1702,7 @@
 
         function closeExportCalendarModal() {
             document.getElementById('export-calendar-modal').classList.add('hidden');
+            openToolsMenu();
         }
 
         function navigateExportCalendar(direction) {
@@ -1755,7 +1771,8 @@
                 'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
                 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
             ];
-            const displayStr = `${parseInt(parts[2])} ${thaiMonths[parseInt(parts[1]) - 1]} ${parseInt(parts[0]) + 543}`;
+            const count = getDatesWithData().get(dateStr) || 0;
+            const displayStr = `${parseInt(parts[2])} ${thaiMonths[parseInt(parts[1]) - 1]} ${parseInt(parts[0]) + 543} (จำนวน ${count} รายการ)`;
 
             const displayEl = document.getElementById('cal-selected-display');
             if (displayEl) displayEl.innerText = displayStr;
@@ -2027,9 +2044,16 @@
 
         function doSearch() {
             renderMap();
-            const hits = getFilteredJobs();
+            const searchVal = document.getElementById('inp-search').value.trim();
             const res = document.getElementById('search-results');
             res.innerHTML = '';
+
+            if (searchVal === '') {
+                res.classList.remove('active');
+                return;
+            }
+
+            const hits = getFilteredJobs();
             if (hits.length > 0) res.classList.add('active');
             else res.classList.remove('active');
 
@@ -2248,8 +2272,8 @@
                 cancelButtonText: 'ยกเลิก'
             }).then(async (r) => {
                 if (r.isConfirmed) {
-                    // Try to delete from Cloudinary if upload was within 10 minutes (and delete_token is present)
-                    if (img.delete_token && img.uploadedAt && (Date.now() - img.uploadedAt < 600000)) {
+                    // Try to delete from Cloudinary using delete_token
+                    if (img.delete_token) {
                         try {
                             const url = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/delete_by_token`;
                             await fetch(url, {

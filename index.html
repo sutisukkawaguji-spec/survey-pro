@@ -675,6 +675,12 @@
                         class="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 outline-none"
                         disabled>
                 </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500 ml-1">ที่มา / ชื่อไฟล์นำเข้า</label>
+                    <input type="text" id="sheet-source"
+                        class="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 outline-none text-[10px]"
+                        disabled>
+                </div>
 
                 <!-- Cloudinary Image Gallery & Camera Upload -->
                 <div class="space-y-2">
@@ -917,17 +923,17 @@
                 <div id="scontent-geojson" class="tab-content hidden space-y-4">
                     <div class="p-4 border border-green-150 rounded-2xl bg-green-50/20 space-y-3">
                         <h3 class="text-xs font-bold text-green-800 flex items-center gap-1">
-                            <i class="fa-brands fa-google-drive"></i> ลิงก์แชร์ GeoJSON จาก Google Drive
+                            <i class="fa-brands fa-dropbox"></i> ลิงก์แชร์ GeoJSON จาก Dropbox
                         </h3>
                         <p class="text-[11px] text-gray-600 leading-relaxed">วางลิงก์ที่เปิดแชร์สาธารณะของไฟล์ .geojson
-                            จาก Google Drive เพื่อโหลดแปลงลงแผนที่และบันทึกลงฐานข้อมูล Supabase
+                            จาก Dropbox เพื่อโหลดแปลงลงแผนที่และบันทึกลงฐานข้อมูล Supabase
                             เพื่อให้สมาชิกในทีมสำรวจร่วมกัน</p>
                         <div>
                             <input type="text" id="set-geojson-drive-url"
-                                placeholder="https://drive.google.com/file/d/.../view?usp=sharing"
+                                placeholder="https://www.dropbox.com/s/.../file.geojson?dl=0"
                                 class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-green-500">
                         </div>
-                        <button onclick="importFromGoogleDriveLink()"
+                        <button onclick="importFromCloudLink()"
                             class="w-full bg-green-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-green-700 active:scale-95 transition flex items-center justify-center gap-2">
                             <i class="fa-solid fa-cloud-arrow-down text-sm"></i> นำเข้าข้อมูลเข้าฐานข้อมูลของทีม
                         </button>
