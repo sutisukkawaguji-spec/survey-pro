@@ -434,13 +434,23 @@
         .swal2-container {
             z-index: 99999 !important;
             -webkit-overflow-scrolling: touch !important;
+            pointer-events: auto !important;
         }
         .swal2-container.swal2-hidden {
             display: none !important;
             pointer-events: none !important;
         }
-        .swal2-container:not(.swal2-shown) {
-            pointer-events: none !important;
+        .swal2-popup {
+            pointer-events: auto !important;
+        }
+        .swal2-actions {
+            pointer-events: auto !important;
+            z-index: 10 !important;
+        }
+        .swal2-actions button {
+            pointer-events: auto !important;
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
         }
         body.swal2-shown {
             overflow: hidden !important;
