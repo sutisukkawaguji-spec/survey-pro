@@ -258,8 +258,10 @@
         let navInterval = null;
 
         let showPinLabels = localStorage.getItem('survey_show_labels') !== 'false';
-        let cloudinaryCloudName = localStorage.getItem('survey_cloudinary_cloud_name') || '';
-        let cloudinaryUploadPreset = localStorage.getItem('survey_cloudinary_upload_preset') || '';
+        const cloudinaryCloudName = 'dsi3g3dix';
+        const cloudinaryUploadPreset = 'survey-extrapro';
+        let isGpsActive = false;
+        let gpsWatchId = null;
 
         let maps, currentBaseMap = 'hybrid';
 
@@ -297,17 +299,7 @@
             maps.hybrid.addTo(map);
             markersGroup.addTo(map);
 
-            navigator.geolocation.watchPosition(p => {
-                const latlng = [p.coords.latitude, p.coords.longitude];
-                if (!userMarker) {
-                    userMarker = L.marker(latlng, {
-                        icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
-                    }).addTo(map);
-                } else {
-                    userMarker.setLatLng(latlng);
-                }
-                if (isFollowing && !isNavigating) map.setView(latlng, 18);
-            }, e => { }, { enableHighAccuracy: true });
+            startGpsTracking();
 
             map.on('dragstart', () => { if (isFollowing) toggleGPSFollow(false); });
 
@@ -323,11 +315,85 @@
             }
         }
 
+        function startGpsTracking() {
+            if (gpsWatchId) navigator.geolocation.clearWatch(gpsWatchId);
+            
+            gpsWatchId = navigator.geolocation.watchPosition(p => {
+                isGpsActive = true;
+                updateGpsStatus();
+                const latlng = [p.coords.latitude, p.coords.longitude];
+                if (!userMarker) {
+                    userMarker = L.marker(latlng, {
+                        icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
+                    }).addTo(map);
+                } else {
+                    userMarker.setLatLng(latlng);
+                }
+                if (isFollowing && !isNavigating) map.setView(latlng, 18);
+            }, e => {
+                isGpsActive = false;
+                updateGpsStatus();
+                console.error("GPS Watch error", e);
+            }, { enableHighAccuracy: true });
+        }
+
+        function updateGpsStatus() {
+            const el = document.getElementById('profile-gps-status');
+            if (!el) return;
+            if (isGpsActive) {
+                el.innerHTML = '<span class="inline-flex items-center text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded-full"><i class="fa-solid fa-circle text-[6px] mr-1 animate-pulse"></i> ใช้งานได้</span>';
+            } else {
+                el.innerHTML = '<span class="inline-flex items-center text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full"><i class="fa-solid fa-circle text-[6px] mr-1"></i> ไม่ได้รับอนุญาต / ปิดอยู่</span>';
+            }
+        }
+
+        function resetGps() {
+            showLoading(true, 'กำลังเปิดขอสิทธิ์ GPS อีกครั้ง...');
+            navigator.geolocation.getCurrentPosition(p => {
+                isGpsActive = true;
+                updateGpsStatus();
+                const latlng = [p.coords.latitude, p.coords.longitude];
+                if (!userMarker) {
+                    userMarker = L.marker(latlng, {
+                        icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
+                    }).addTo(map);
+                } else {
+                    userMarker.setLatLng(latlng);
+                }
+                map.setView(latlng, 17);
+                showLoading(false);
+                Swal.fire({
+                    icon: 'success',
+                    title: 'เชื่อมต่อ GPS สำเร็จ',
+                    text: 'ตำแหน่งของคุณอัปเดตบนแผนที่เรียบร้อยแล้ว',
+                    timer: 2000,
+                    showConfirmButton: false
+                });
+                startGpsTracking();
+            }, err => {
+                isGpsActive = false;
+                updateGpsStatus();
+                showLoading(false);
+                let errMsg = 'กรุณาตรวจสอบว่าเปิดระบุตำแหน่งบนอุปกรณ์แล้ว';
+                if (err.code === 1) {
+                    errMsg = 'สิทธิ์ระบุตำแหน่งถูกปฏิเสธ กรุณากดรูปแม่กุญแจ (Padlock) ที่แถบที่อยู่เว็บ (URL Bar) และเลือก "อนุญาต" ตำแหน่ง (Location) จากนั้นลองกดรีเซ็ตอีกครั้ง';
+                }
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'เชื่อมต่อ GPS ไม่สำเร็จ',
+                    text: errMsg,
+                    confirmButtonText: 'รับทราบ',
+                    confirmButtonColor: '#3b82f6'
+                });
+            }, { enableHighAccuracy: true, timeout: 10000 });
+        }
+
         function updateUserInfo() {
             document.getElementById('user-display').innerText = currentUser.name;
             document.getElementById('profile-display-name').innerText = currentUser.name;
             document.getElementById('profile-email').innerText = currentUser.email || '-';
             document.getElementById('profile-user-code').innerText = currentUser.user_code || '------';
+            updateGpsStatus();
         }
 
         function updateCounter() {
@@ -360,7 +426,10 @@
                 const matchCat = j.category === currentUser.category;
                 const p = j.properties;
                 const txt = search;
-                const matchS = txt === "" || (p.name || "").toString().toLowerCase().includes(txt) || (p.note || "").toString().toLowerCase().includes(txt);
+                const matchS = txt === "" || 
+                    (p.name || "").toString().toLowerCase().includes(txt) || 
+                    (p.note || "").toString().toLowerCase().includes(txt) ||
+                    (p.search_field || "").toString().toLowerCase().includes(txt);
                 const matchA = amphoe === "" || (p.amphoe || p.AMPH_NAME) == amphoe;
                 const matchT = tambon === "" || (p.tambon || p.TUMB_NAME) == tambon;
                 return matchCat && matchS && matchA && matchT;
@@ -524,6 +593,10 @@
             document.getElementById('sheet-meta').innerText = `${p.amphoe || p.AMPH_NAME || '-'} / ${p.tambon || p.TUMB_NAME || '-'}`;
             document.getElementById('sheet-name').value = p.name || '';
             document.getElementById('sheet-note').value = p.note || '';
+            
+            if (document.getElementById('sheet-area')) {
+                document.getElementById('sheet-area').value = p.area || '-';
+            }
 
             const btnSave = document.getElementById('btn-save');
             const btnEdit = document.getElementById('btn-edit');
@@ -604,15 +677,147 @@
         function viewJsonData() {
             const job = dbJobs.find(j => j.id === selectedJobId);
             if (!job) return;
-            let html = '<div class="text-left text-xs max-h-[60vh] overflow-y-auto"><table class="w-full border-collapse">';
+
+            const sheet = document.getElementById('sheet');
+            const fabContainer = document.getElementById('fab-container');
+            const wasMinimized = sheet.classList.contains('minimized');
+            const wasActive = sheet.classList.contains('active');
+
+            // Slide details sheet out of view completely & lower z-index so it doesn't overlay Swal modal
+            sheet.classList.remove('active');
+            sheet.style.zIndex = '1000';
+            if (fabContainer) fabContainer.classList.remove('sheet-open');
+
+            let html = '<div class="text-left text-xs max-h-[60vh] overflow-y-auto"><table class="w-full border-collapse border border-gray-200 rounded-xl overflow-hidden">';
             const sortedKeys = Object.keys(job.properties).sort();
             sortedKeys.forEach(k => {
-                if (k !== 'name' && k !== 'note' && k !== 'date') {
-                    html += `<tr class="border-b"><td class="font-bold p-2 text-gray-500 bg-gray-50 w-1/3">${k}</td><td class="p-2 text-gray-800 break-words">${job.properties[k]}</td></tr>`;
+                if (k !== 'images' && k !== 'name' && k !== 'note' && k !== 'date' && k !== 'search_field' && k !== 'amphoe' && k !== 'tambon' && k !== 'area') {
+                    const val = typeof job.properties[k] === 'object' ? JSON.stringify(job.properties[k]) : job.properties[k];
+                    html += `
+                        <tr class="border-b border-gray-150 hover:bg-gray-50">
+                            <td class="font-bold p-2.5 text-gray-500 bg-gray-100/50 w-1/3 border-r border-gray-150">${k}</td>
+                            <td class="p-2.5 text-gray-800 break-all">${val !== undefined && val !== null ? val : '-'}</td>
+                        </tr>
+                    `;
                 }
             });
             html += '</table></div>';
-            Swal.fire({ title: 'ข้อมูลต้นฉบับ', html: html, width: '90%', confirmButtonText: 'ปิด', confirmButtonColor: '#4b5563' });
+
+            Swal.fire({
+                title: 'ข้อมูลต้นฉบับ (ทั้งหมด)',
+                html: html,
+                width: '90%',
+                confirmButtonText: 'ปิด',
+                confirmButtonColor: '#4b5563',
+                allowOutsideClick: false
+            }).then(() => {
+                // Restore sheet state and default z-index
+                sheet.style.zIndex = '';
+                if (wasActive) {
+                    sheet.classList.add('active');
+                    if (fabContainer) fabContainer.classList.add('sheet-open');
+                }
+                if (wasMinimized) {
+                    sheet.classList.add('minimized');
+                } else {
+                    sheet.classList.remove('minimized');
+                }
+            });
+        }
+
+        let tempImportFeatures = [];
+        let onConfirmImportCallback = null;
+
+        function showFieldMapping(feats, onConfirm) {
+            tempImportFeatures = feats;
+            onConfirmImportCallback = onConfirm;
+
+            // Extract all keys
+            const allKeys = new Set();
+            feats.forEach(f => {
+                const p = f.properties || f;
+                Object.keys(p).forEach(k => {
+                    if (typeof p[k] !== 'object') allKeys.add(k);
+                });
+            });
+            const keysArray = Array.from(allKeys).sort();
+
+            const fields = ['id', 'search', 'amphoe', 'tambon', 'area'];
+            fields.forEach(f => {
+                const select = document.getElementById(`map-field-${f}`);
+                if (select) {
+                    select.innerHTML = '<option value="">-- ไม่ระบุ (ข้าม) --</option>';
+                    keysArray.forEach(k => {
+                        select.innerHTML += `<option value="${k}">${k}</option>`;
+                    });
+                }
+            });
+
+            // Set default selections
+            const idSel = document.getElementById('map-field-id');
+            const searchSel = document.getElementById('map-field-search');
+            const amphoeSel = document.getElementById('map-field-amphoe');
+            const tambonSel = document.getElementById('map-field-tambon');
+            const areaSel = document.getElementById('map-field-area');
+
+            // Reset values first
+            if (idSel) idSel.value = "";
+            if (searchSel) searchSel.value = "";
+            if (amphoeSel) amphoeSel.value = "";
+            if (tambonSel) tambonSel.value = "";
+            if (areaSel) areaSel.value = "";
+
+            // Auto-detect best match
+            keysArray.forEach(k => {
+                const lower = k.toLowerCase();
+                if (idSel && !idSel.value && (lower.includes('id') || lower.includes('reg') || lower.includes('name') || lower.includes('ทะเบียน'))) {
+                    idSel.value = k;
+                }
+                if (searchSel && !searchSel.value && (lower.includes('name') || lower.includes('desc') || lower.includes('remark') || lower.includes('ชื่อ') || lower.includes('หมายเหตุ'))) {
+                    searchSel.value = k;
+                }
+                if (amphoeSel && !amphoeSel.value && (lower.includes('amphoe') || lower.includes('amp') || lower.includes('อ.') || lower.includes('อำเภอ'))) {
+                    amphoeSel.value = k;
+                }
+                if (tambonSel && !tambonSel.value && (lower.includes('tambon') || lower.includes('tum') || lower.includes('ต.') || lower.includes('ตำบล'))) {
+                    tambonSel.value = k;
+                }
+                if (areaSel && !areaSel.value && (lower.includes('area') || lower.includes('size') || lower.includes('rai') || lower.includes('เนื้อที่'))) {
+                    areaSel.value = k;
+                }
+            });
+
+            // Show modal
+            document.getElementById('import-mapping-modal').classList.remove('hidden');
+        }
+
+        function closeImportMappingModal() {
+            document.getElementById('import-mapping-modal').classList.add('hidden');
+            tempImportFeatures = [];
+            onConfirmImportCallback = null;
+        }
+
+        // Set up Event Listener for Confirm Import
+        if (document.getElementById('btn-confirm-import')) {
+            document.getElementById('btn-confirm-import').onclick = async () => {
+                const mappedId = document.getElementById('map-field-id').value;
+                const mappedSearch = document.getElementById('map-field-search').value;
+                const mappedAmphoe = document.getElementById('map-field-amphoe').value;
+                const mappedTambon = document.getElementById('map-field-tambon').value;
+                const mappedArea = document.getElementById('map-field-area').value;
+
+                document.getElementById('import-mapping-modal').classList.add('hidden');
+
+                if (onConfirmImportCallback) {
+                    await onConfirmImportCallback({
+                        idKey: mappedId,
+                        searchKey: mappedSearch,
+                        amphoeKey: mappedAmphoe,
+                        tambonKey: mappedTambon,
+                        areaKey: mappedArea
+                    });
+                }
+            };
         }
 
         async function importData(input) {
@@ -627,40 +832,63 @@
                     const json = JSON.parse(raw);
                     let feats = (json.type === "FeatureCollection") ? json.features : (Array.isArray(json) ? json : [json]);
 
-                    let count = 0;
-                    for (let f of feats) {
-                        const p = f.properties || f;
-                        let geom = f.geometry;
-                        if (!geom && (f.lat || p.lat)) geom = { type: 'Point', coordinates: [parseFloat(f.lng || p.lng), parseFloat(f.lat || p.lat)] };
-                        if (!geom) continue;
-                        let lat, lng;
-                        if (geom.type === 'Point') {
-                            lng = geom.coordinates[0];
-                            lat = geom.coordinates[1];
-                        } else {
-                            try {
-                                const l = L.geoJSON(geom);
-                                const c = l.getBounds().getCenter();
-                                lat = c.lat;
-                                lng = c.lng;
-                            } catch (err) {
-                                continue;
+                    showLoading(false);
+                    showFieldMapping(feats, async (mapping) => {
+                        showLoading(true, `กำลังเขียน ${feats.length} รายการลงคลาวด์ Supabase...`);
+                        let count = 0;
+                        for (let f of feats) {
+                            const p = f.properties || f;
+                            let geom = f.geometry;
+                            if (!geom && (f.lat || p.lat)) geom = { type: 'Point', coordinates: [parseFloat(f.lng || p.lng), parseFloat(f.lat || p.lat)] };
+                            if (!geom) continue;
+                            let lat, lng;
+                            if (geom.type === 'Point') {
+                                lng = geom.coordinates[0];
+                                lat = geom.coordinates[1];
+                            } else {
+                                try {
+                                    const l = L.geoJSON(geom);
+                                    const c = l.getBounds().getCenter();
+                                    lat = c.lat;
+                                    lng = c.lng;
+                                } catch (err) {
+                                    continue;
+                                }
                             }
+
+                            const idValue = mapping.idKey ? p[mapping.idKey] : null;
+                            const nameVal = idValue || 'นำเข้า';
+                            const searchVal = mapping.searchKey ? p[mapping.searchKey] : '';
+                            const amphoeVal = mapping.amphoeKey ? p[mapping.amphoeKey] : '';
+                            const tambonVal = mapping.tambonKey ? p[mapping.tambonKey] : '';
+                            const areaVal = mapping.areaKey ? p[mapping.areaKey] : '';
+
+                            // Check duplicate first to keep status/notes/photos if already exists
+                            const existing = dbJobs.find(x => x.id === idValue);
+                            const job = {
+                                id: idValue || 'IMP-' + Math.random().toString(36).substr(2, 9),
+                                lat,
+                                lng,
+                                geometry: geom,
+                                status: existing ? existing.status : 'waiting',
+                                category: currentUser.category,
+                                properties: {
+                                    ...p,
+                                    name: nameVal,
+                                    note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
+                                    images: existing ? existing.properties.images : [],
+                                    search_field: searchVal,
+                                    amphoe: amphoeVal,
+                                    tambon: tambonVal,
+                                    area: areaVal
+                                }
+                            };
+                            await saveJobToSupabase(job);
+                            count++;
                         }
-                        const job = {
-                            id: p.REG_ID || p.name || 'IMP-' + Math.random().toString(36).substr(2, 9),
-                            lat,
-                            lng,
-                            geometry: geom,
-                            status: 'waiting',
-                            category: currentUser.category,
-                            properties: { ...p, name: p.REG_ID || p.name || 'นำเข้า', note: p.REMARK || p.note || '' }
-                        };
-                        await saveJobToSupabase(job);
-                        count++;
-                    }
-                    Swal.fire('สำเร็จ', `นำเข้าแปลงที่ดินสำเร็จ ${count} รายการ`, 'success');
-                    await syncJobsFromDB();
+                        Swal.fire('สำเร็จ', `นำเข้าแปลงที่ดินสำเร็จ ${count} รายการ`, 'success');
+                        await syncJobsFromDB();
+                    });
                 } catch (err) {
                     Swal.fire('เกิดข้อผิดพลาดในการโหลดไฟล์', err.message, 'error');
                 } finally {
@@ -697,23 +925,81 @@
         }
 
         function deleteJob() {
+            const job = dbJobs.find(x => x.id === selectedJobId);
+            if (!job) return;
+
+            const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
+
+            let htmlContent = `
+                <div class="text-sm text-gray-600 text-left space-y-2">
+                    <p>ระบบจะลบผลการสำรวจ (หมายเหตุ, รูปถ่าย, วันที่) และคืนค่าสถานะแปลงนี้ให้เป็น <b>"รอการตรวจสอบ"</b></p>
+                    <p class="text-red-500 font-bold">* แปลงที่ดินจะยังคงแสดงอยู่บนแผนที่ตามปกติ</p>
+            `;
+
+            if (hasImages) {
+                htmlContent += `
+                    <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2">
+                        <input type="checkbox" id="swal-delete-cloud-images" class="w-4 h-4 rounded text-red-650 focus:ring-red-500 cursor-pointer">
+                        <label for="swal-delete-cloud-images" class="text-xs font-bold text-gray-700 cursor-pointer select-none">
+                            ลบรูปภาพทั้งหมด (${job.properties.images.length} รูป) ออกจาก Cloudinary ด้วย
+                        </label>
+                    </div>
+                `;
+            }
+
+            htmlContent += `</div>`;
+
             Swal.fire({
-                title: 'ลบรายการนี้?',
-                text: 'ข้อมูลพิกัดและผลการสำรวจจะหายไปถาวร',
+                title: 'ลบข้อมูลการสำรวจ?',
+                html: htmlContent,
                 icon: 'warning',
                 showCancelButton: true,
-                confirmButtonColor: '#ef4444'
+                confirmButtonColor: '#ef4444',
+                confirmButtonText: 'ยืนยันการลบข้อมูลสำรวจ',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: () => {
+                    const chk = document.getElementById('swal-delete-cloud-images');
+                    return {
+                        deleteFromCloud: chk ? chk.checked : false
+                    };
+                }
             }).then(async (r) => {
                 if (r.isConfirmed) {
-                    showLoading(true, 'กำลังลบแปลงสำรวจ...');
+                    const deleteFromCloud = r.value.deleteFromCloud;
+                    showLoading(true, 'กำลังลบผลการสำรวจ...');
                     try {
-                        await deleteJobFromSupabase(selectedJobId);
-                        dbJobs = dbJobs.filter(j => j.id !== selectedJobId);
+                        // 1. If checked, delete images from Cloudinary
+                        if (deleteFromCloud && hasImages) {
+                            for (const img of job.properties.images) {
+                                if (img.delete_token) {
+                                    try {
+                                        const url = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/delete_by_token`;
+                                        await fetch(url, {
+                                            method: 'POST',
+                                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                                            body: `token=${img.delete_token}`
+                                        });
+                                    } catch (err) {
+                                        console.error("Cloudinary token delete failed during job delete", err);
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Clear survey properties and reset status to 'waiting'
+                        job.status = 'waiting';
+                        job.properties.note = '';
+                        job.properties.date = '';
+                        job.properties.images = [];
+
+                        // 3. Save to Supabase
+                        await saveJobToSupabase(job);
+
                         renderMap();
                         closeSheet();
-                        Swal.fire({ toast: true, icon: 'success', title: 'ลบข้อมูลแล้ว', timer: 1000, showConfirmButton: false });
+                        Swal.fire({ toast: true, icon: 'success', title: 'ลบผลการสำรวจและคืนค่าสถานะแล้ว', timer: 1500, showConfirmButton: false });
                     } catch (e) {
-                        Swal.fire('ลบไม่สำเร็จ', e.message, 'error');
+                        Swal.fire('ทำรายการไม่สำเร็จ', e.message, 'error');
                     } finally {
                         showLoading(false);
                     }
@@ -783,7 +1069,7 @@
         let activeSettingsTab = 'profile';
         function switchSettingsTab(tab) {
             activeSettingsTab = tab;
-            const tabs = ['profile', 'geojson', 'cloudinary'];
+            const tabs = ['profile', 'geojson'];
             tabs.forEach(t => {
                 const btn = document.getElementById(`stab-${t}`);
                 const content = document.getElementById(`scontent-${t}`);
@@ -798,9 +1084,6 @@
 
             if (tab === 'profile') {
                 loadTeamMembers();
-            } else if (tab === 'cloudinary') {
-                document.getElementById('config-cloudinary-cloud-name').value = cloudinaryCloudName;
-                document.getElementById('config-cloudinary-upload-preset').value = cloudinaryUploadPreset;
             }
         }
 
@@ -930,15 +1213,38 @@
 
         async function removeTeamMember(id) {
             Swal.fire({
-                title: 'ยืนยันลบสมาชิกออก?',
-                text: 'สมาชิกคนนี้จะถูกผลักออกจากทีมและจะทำงานเดี่ยวแทน',
-                icon: 'warning',
+                title: 'ยืนยันความปลอดภัย',
+                text: 'กรุณากรอกรหัสผ่านบัญชีของคุณเพื่อยืนยันการลบสมาชิกออกจากทีม',
+                input: 'password',
+                inputPlaceholder: 'รหัสผ่านของคุณ',
                 showCancelButton: true,
-                confirmButtonColor: '#ef4444'
-            }).then(async (r) => {
-                if (r.isConfirmed) {
-                    showLoading(true, 'กำลังลบสมาชิกออกจากกลุ่ม...');
+                confirmButtonColor: '#ef4444',
+                confirmButtonText: 'ยืนยันรหัสผ่านเพื่อลบ',
+                cancelButtonText: 'ยกเลิก',
+                inputAttributes: {
+                    autocapitalize: 'off',
+                    autocorrect: 'off'
+                }
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    const password = result.value;
+                    if (!password) {
+                        return Swal.fire('ผิดพลาด', 'กรุณากรอกรหัสผ่านเพื่อดำเนินการต่อ', 'error');
+                    }
+
+                    showLoading(true, 'กำลังตรวจสอบความถูกต้อง...');
                     try {
+                        const currentEmail = currentUser.email;
+                        if (!currentEmail) throw new Error("ไม่พบอีเมลผู้ใช้งานปัจจุบัน");
+
+                        const { error: authError } = await supabaseClient.auth.signInWithPassword({
+                            email: currentEmail,
+                            password: password
+                        });
+
+                        if (authError) throw new Error("รหัสผ่านไม่ถูกต้อง");
+
+                        showLoading(true, 'กำลังลบสมาชิกออกจากกลุ่ม...');
                         const { error } = await supabaseClient
                             .from('profiles')
                             .update({ team_id: id })
@@ -949,7 +1255,7 @@
                         Swal.fire('สำเร็จ', 'นำผู้ใช้งานออกจากกลุ่มสำรวจแล้ว', 'success');
                         await loadTeamMembers();
                     } catch (err) {
-                        Swal.fire('ลบสมาชิกผิดพลาด', err.message, 'error');
+                        Swal.fire('การลบสมาชิกล้มเหลว', err.message, 'error');
                     } finally {
                         showLoading(false);
                     }
@@ -982,46 +1288,67 @@
                 const json = await response.json();
                 let feats = (json.type === "FeatureCollection") ? json.features : (Array.isArray(json) ? json : [json]);
 
-                showLoading(true, `กำลังเขียน ${feats.length} รายการลงคลาวด์ Supabase...`);
-                let imported = 0;
+                showLoading(false);
+                showFieldMapping(feats, async (mapping) => {
+                    showLoading(true, `กำลังเขียน ${feats.length} รายการลงคลาวด์ Supabase...`);
+                    let imported = 0;
 
-                for (let f of feats) {
-                    const p = f.properties || f;
-                    let geom = f.geometry;
-                    if (!geom && (f.lat || p.lat)) geom = { type: 'Point', coordinates: [parseFloat(f.lng || p.lng), parseFloat(f.lat || p.lat)] };
-                    if (!geom) continue;
+                    for (let f of feats) {
+                        const p = f.properties || f;
+                        let geom = f.geometry;
+                        if (!geom && (f.lat || p.lat)) geom = { type: 'Point', coordinates: [parseFloat(f.lng || p.lng), parseFloat(f.lat || p.lat)] };
+                        if (!geom) continue;
 
-                    let lat, lng;
-                    if (geom.type === 'Point') {
-                        lng = geom.coordinates[0];
-                        lat = geom.coordinates[1];
-                    } else {
-                        try {
-                            const l = L.geoJSON(geom);
-                            const c = l.getBounds().getCenter();
-                            lat = c.lat;
-                            lng = c.lng;
-                        } catch (err) {
-                            continue;
+                        let lat, lng;
+                        if (geom.type === 'Point') {
+                            lng = geom.coordinates[0];
+                            lat = geom.coordinates[1];
+                        } else {
+                            try {
+                                const l = L.geoJSON(geom);
+                                const c = l.getBounds().getCenter();
+                                lat = c.lat;
+                                lng = c.lng;
+                            } catch (err) {
+                                continue;
+                            }
                         }
+
+                        const idValue = mapping.idKey ? p[mapping.idKey] : null;
+                        const nameVal = idValue || 'นำเข้า';
+                        const searchVal = mapping.searchKey ? p[mapping.searchKey] : '';
+                        const amphoeVal = mapping.amphoeKey ? p[mapping.amphoeKey] : '';
+                        const tambonVal = mapping.tambonKey ? p[mapping.tambonKey] : '';
+                        const areaVal = mapping.areaKey ? p[mapping.areaKey] : '';
+
+                        // Check duplicate first
+                        const existing = dbJobs.find(x => x.id === idValue);
+                        const job = {
+                            id: idValue || 'GD-' + Math.random().toString(36).substr(2, 9),
+                            lat,
+                            lng,
+                            geometry: geom,
+                            status: existing ? existing.status : 'waiting',
+                            category: currentUser.category,
+                            properties: {
+                                ...p,
+                                name: nameVal,
+                                note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
+                                images: existing ? existing.properties.images : [],
+                                search_field: searchVal,
+                                amphoe: amphoeVal,
+                                tambon: tambonVal,
+                                area: areaVal
+                            }
+                        };
+                        await saveJobToSupabase(job);
+                        imported++;
                     }
 
-                    const job = {
-                        id: p.REG_ID || p.name || 'GD-' + Math.random().toString(36).substr(2, 9),
-                        lat,
-                        lng,
-                        geometry: geom,
-                        status: 'waiting',
-                        category: currentUser.category,
-                        properties: { ...p, name: p.REG_ID || p.name || 'นำเข้า', note: p.REMARK || p.note || '' }
-                    };
-                    await saveJobToSupabase(job);
-                    imported++;
-                }
-
-                Swal.fire('นำเข้าสำเร็จ', `เชื่อมโยงและนำเข้าข้อมูลสำเร็จ ${imported} แปลงแผนที่`, 'success');
-                await syncJobsFromDB();
-                closeSettingsModal();
+                    Swal.fire('นำเข้าสำเร็จ', `เชื่อมโยงและนำเข้าข้อมูลสำเร็จ ${imported} แปลงแผนที่`, 'success');
+                    await syncJobsFromDB();
+                    closeSettingsModal();
+                });
             } catch (err) {
                 console.error("GeoJSON Google Drive Error", err);
                 Swal.fire({
@@ -1042,26 +1369,7 @@
             }
         }
 
-        async function updateConnectionSettings() {
-            const url = document.getElementById('config-db-url').value.trim();
-            const key = document.getElementById('config-db-key').value.trim();
 
-            if (!url || !key) {
-                return Swal.fire('กรอกข้อมูลไม่ครบ', 'กรุณาระบุข้อมูลทั้ง API URL และ Anon Key', 'warning');
-            }
-
-            localStorage.setItem('survey_supabase_url', url);
-            localStorage.setItem('survey_supabase_key', key);
-            supabaseUrl = url;
-            supabaseKey = key;
-
-            if (initSupabase()) {
-                Swal.fire('บันทึกสำเร็จ', 'เชื่อมต่อข้อมูลเซิร์ฟเวอร์ใหม่แล้ว', 'success');
-                await checkAuthSession();
-            } else {
-                Swal.fire('ผิดพลาด', 'ไม่สามารถเชื่อมต่อได้ ตรวจสอบความถูกต้องของคีย์', 'error');
-            }
-        }
 
         // --- Database & Category Modifiers ---
         function addCat() {
@@ -1099,28 +1407,371 @@
             });
         }
 
-        function doExport(type) {
-            const data = dbJobs.filter(j => j.category === currentUser.category && j.status === 'done');
-            if (data.length === 0) return Swal.fire('ไม่มีข้อมูลเสร็จงาน', 'ไม่มีงานสำรวจที่เสร็จในหมวดหมู่นี้ให้ส่งออก', 'warning');
+        let calCurrentDate = new Date();
+        let calSelectedDate = null;
+        let calActiveMode = 'excel'; // 'excel' or 'report'
 
-            const f = `SURVEY_${currentUser.category}`;
-            if (type === 'xlsx') {
-                const r = data.map(j => ({ ID: j.id, Name: j.properties.name, Note: j.properties.note, Lat: j.lat, Lng: j.lng, Date: j.properties.date }));
+        function getDatesWithData() {
+            const data = dbJobs.filter(j => j.category === currentUser.category && j.status === 'done');
+            const dates = new Set();
+            data.forEach(j => {
+                const d = j.properties.date || (j.updated_at ? j.updated_at.split('T')[0] : '');
+                if (d) dates.add(d);
+            });
+            return dates;
+        }
+
+        function openExportCalendarModal(mode) {
+            closeSettingsModal();
+            calActiveMode = mode;
+            calSelectedDate = null;
+            calCurrentDate = new Date(); // Reset to today's month
+
+            const titleEl = document.getElementById('export-calendar-title');
+            if (titleEl) {
+                titleEl.innerHTML = mode === 'excel'
+                    ? '<i class="fa-solid fa-file-excel text-green-600"></i> เลือกวันในการออก Excel'
+                    : '<i class="fa-solid fa-file-invoice text-blue-600"></i> เลือกวันในการออกรายงาน';
+            }
+
+            const actionContainer = document.getElementById('cal-action-container');
+            if (actionContainer) actionContainer.classList.add('hidden');
+
+            renderExportCalendar();
+            document.getElementById('export-calendar-modal').classList.remove('hidden');
+        }
+
+        function closeExportCalendarModal() {
+            document.getElementById('export-calendar-modal').classList.add('hidden');
+        }
+
+        function navigateExportCalendar(direction) {
+            calCurrentDate.setMonth(calCurrentDate.getMonth() + direction);
+            renderExportCalendar();
+        }
+
+        function renderExportCalendar() {
+            const year = calCurrentDate.getFullYear();
+            const month = calCurrentDate.getMonth();
+
+            const thaiMonths = [
+                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+            ];
+
+            const monthYearEl = document.getElementById('cal-month-year');
+            if (monthYearEl) {
+                monthYearEl.innerText = `${thaiMonths[month]} ${year + 543}`;
+            }
+
+            const firstDay = new Date(year, month, 1).getDay();
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+            const grid = document.getElementById('cal-days-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+
+            const datesWithData = getDatesWithData();
+
+            // Render empty cells for leading blank days
+            for (let i = 0; i < firstDay; i++) {
+                grid.innerHTML += `<div class="p-2"></div>`;
+            }
+
+            // Render days of the month
+            for (let day = 1; day <= daysInMonth; day++) {
+                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                const hasData = datesWithData.has(dateStr);
+                const isSelected = calSelectedDate === dateStr;
+
+                let classes = "p-2 rounded-xl text-center transition select-none ";
+                let onClickAttr = "";
+
+                if (isSelected) {
+                    classes += "bg-blue-600 text-white font-bold cursor-pointer shadow-md";
+                    onClickAttr = `onclick="selectExportDate('${dateStr}')"`;
+                } else if (hasData) {
+                    // Highlight with data
+                    classes += "bg-emerald-100 text-emerald-800 font-bold hover:bg-emerald-200 cursor-pointer border border-emerald-300 shadow-sm";
+                    onClickAttr = `onclick="selectExportDate('${dateStr}')"`;
+                } else {
+                    classes += "text-gray-300 pointer-events-none";
+                }
+
+                grid.innerHTML += `<div class="${classes}" ${onClickAttr}>${day}</div>`;
+            }
+        }
+
+        function selectExportDate(dateStr) {
+            calSelectedDate = dateStr;
+            
+            // Format for display
+            const parts = dateStr.split('-');
+            const thaiMonths = [
+                'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+                'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+            ];
+            const displayStr = `${parseInt(parts[2])} ${thaiMonths[parseInt(parts[1]) - 1]} ${parseInt(parts[0]) + 543}`;
+
+            const displayEl = document.getElementById('cal-selected-display');
+            if (displayEl) displayEl.innerText = displayStr;
+
+            const actionContainer = document.getElementById('cal-action-container');
+            if (actionContainer) actionContainer.classList.remove('hidden');
+
+            renderExportCalendar();
+        }
+
+        function confirmExportCalendar(exportAll = false) {
+            let data = [];
+            if (exportAll) {
+                data = dbJobs.filter(j => j.category === currentUser.category && j.status === 'done');
+                if (data.length === 0) {
+                    return Swal.fire('ไม่มีข้อมูล', 'ไม่มีข้อมูลงานเสร็จสิ้นเพื่อส่งออก', 'warning');
+                }
+            } else {
+                if (!calSelectedDate) {
+                    return Swal.fire('กรุณาเลือกวัน', 'คุณยังไม่ได้เลือกวันที่ต้องการส่งออก', 'warning');
+                }
+                data = dbJobs.filter(j => {
+                    const d = j.properties.date || (j.updated_at ? j.updated_at.split('T')[0] : '');
+                    return j.category === currentUser.category && j.status === 'done' && d === calSelectedDate;
+                });
+                if (data.length === 0) {
+                    return Swal.fire('ไม่มีข้อมูล', 'ไม่มีข้อมูลงานเสร็จสิ้นในวันที่เลือก', 'warning');
+                }
+            }
+
+            closeExportCalendarModal();
+
+            if (calActiveMode === 'excel') {
+                const suffix = exportAll ? 'ALL' : calSelectedDate;
+                const f = `SURVEY_${currentUser.category}_${suffix}`;
+                const r = data.map(j => ({
+                    ID: j.id,
+                    Name: j.properties.name,
+                    Tambon: j.properties.tambon || j.properties.TUMB_NAME || '',
+                    Amphoe: j.properties.amphoe || j.properties.AMPH_NAME || '',
+                    Area: j.properties.area || '',
+                    Note: j.properties.note,
+                    Lat: j.lat,
+                    Lng: j.lng,
+                    Date: j.properties.date || (j.updated_at ? j.updated_at.split('T')[0] : '')
+                }));
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(r), "Data");
                 XLSX.writeFile(wb, f + '.xlsx');
+            } else {
+                generateReport(data);
             }
-            if (type === 'kml') {
-                const g = {
-                    type: "FeatureCollection",
-                    features: data.map(j => ({
-                        type: "Feature",
-                        properties: { name: j.properties.name, note: j.properties.note },
-                        geometry: j.geometry
-                    }))
-                };
-                download(tokml(g), f + '.kml', 'application/vnd.google-earth.kml+xml');
+        }
+
+        function generateReport(jobs) {
+            const printWindow = window.open('', '_blank');
+            if (!printWindow) {
+                return Swal.fire('ป๊อปอัปถูกบล็อก', 'กรุณาอนุญาตให้เปิดหน้าต่างป๊อปอัปสำหรับเว็บไซต์นี้', 'warning');
             }
+
+            let html = `
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>รายงานการสำรวจตรวจสอบที่ราชพัสดุ</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&display=swap');
+        body {
+            font-family: 'Sarabun', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        .page {
+            background-color: #ffffff;
+            width: 210mm;
+            min-height: 297mm;
+            padding: 20mm;
+            margin: 10mm auto;
+            box-sizing: border-box;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+            page-break-after: always;
+            break-after: page;
+            display: flex;
+            flex-direction: column;
+        }
+        @media print {
+            body {
+                background-color: #ffffff;
+                margin: 0;
+                padding: 0;
+            }
+            .page {
+                width: auto;
+                min-height: auto;
+                margin: 0;
+                padding: 10mm;
+                box-shadow: none;
+                border-radius: 0;
+            }
+        }
+        .header {
+            text-align: center;
+            font-size: 22px;
+            font-weight: bold;
+            color: #1e3a8a;
+            border-bottom: 3px double #3b82f6;
+            padding-bottom: 12px;
+            margin-bottom: 25px;
+        }
+        .image-gallery {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        .image-card {
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            overflow: hidden;
+            background-color: #f9fafb;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+        .image-card img {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            display: block;
+        }
+        .no-images {
+            grid-column: span 2;
+            text-align: center;
+            padding: 30px;
+            color: #9ca3af;
+            border: 2px dashed #e5e7eb;
+            border-radius: 12px;
+            font-size: 14px;
+        }
+        .section-title {
+            font-size: 16px;
+            font-weight: bold;
+            color: #1e3a8a;
+            border-bottom: 2px solid #e5e7eb;
+            padding-bottom: 6px;
+            margin-bottom: 15px;
+            margin-top: 15px;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            row-gap: 12px;
+            column-gap: 15px;
+            font-size: 14px;
+            line-height: 1.6;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #4b5563;
+        }
+        .info-value {
+            color: #111827;
+            word-break: break-word;
+        }
+        .footer {
+            margin-top: auto;
+            text-align: right;
+            font-size: 11px;
+            color: #9ca3af;
+            border-top: 1px solid #f3f4f6;
+            padding-top: 10px;
+        }
+    </style>
+</head>
+<body>
+`;
+
+            jobs.forEach((j, index) => {
+                const name = j.properties.name || '(ไม่มีชื่อแปลง)';
+                const note = j.properties.note || '(ไม่มีรายละเอียดบันทึก)';
+                const date = j.properties.date || (j.updated_at ? j.updated_at.split('T')[0] : '-');
+                const amphoe = j.properties.amphoe || j.properties.AMPH_NAME || '-';
+                const tambon = j.properties.tambon || j.properties.TUMB_NAME || '-';
+                const area = j.properties.area || '-';
+                const images = j.properties.images || [];
+
+                let imagesHtml = '';
+                if (images.length > 0) {
+                    imagesHtml = '<div class="image-gallery">';
+                    images.forEach(img => {
+                        imagesHtml += `
+                            <div class="image-card">
+                                <img src="${img.url}" alt="ภาพถ่ายสำรวจ">
+                            </div>
+                        `;
+                    });
+                    imagesHtml += '</div>';
+                } else {
+                    imagesHtml = `
+                        <div class="no-images">
+                            ไม่มีภาพถ่ายประกอบ
+                        </div>
+                    `;
+                }
+
+                html += `
+    <div class="page">
+        <div class="header">รายงานการสำรวจตรวจสอบที่ราชพัสดุ</div>
+        
+        <div class="section-title">📷 ภาพถ่ายจากการสำรวจ</div>
+        ${imagesHtml}
+        
+        <div class="section-title">📝 รายละเอียดการสำรวจ</div>
+        <div class="info-grid">
+            <div class="info-label">ชื่อแปลง / เลขทะเบียนที่ดิน:</div>
+            <div class="info-value" style="font-weight: bold;">${name}</div>
+            
+            <div class="info-label">ตำบล:</div>
+            <div class="info-value">${tambon}</div>
+            
+            <div class="info-label">อำเภอ:</div>
+            <div class="info-value">${amphoe}</div>
+            
+            <div class="info-label">เนื้อที่แปลงที่ดิน:</div>
+            <div class="info-value">${area}</div>
+            
+            <div class="info-label">พิกัดทางภูมิศาสตร์:</div>
+            <div class="info-value">Latitude: ${j.lat}, Longitude: ${j.lng}</div>
+            
+            <div class="info-label">หมวดหมู่งาน:</div>
+            <div class="info-value">${j.category}</div>
+            
+            <div class="info-label">วันที่ดำเนินการสำรวจ:</div>
+            <div class="info-value">${date}</div>
+            
+            <div class="info-label">บันทึกเพิ่มเติม:</div>
+            <div class="info-value">${note}</div>
+        </div>
+        
+        <div class="footer">
+            หน้า ${index + 1} จาก ${jobs.length} | สร้างโดยระบบจัดเก็บข้อมูล Smart Survey
+        </div>
+    </div>
+                `;
+            });
+
+            html += `
+    <script>
+        window.onload = function() {
+            window.print();
+        }
+    <\/script>
+</body>
+</html>
+`;
+            printWindow.document.open();
+            printWindow.document.write(html);
+            printWindow.document.close();
         }
 
         function download(c, n, m) {
@@ -1190,17 +1841,7 @@
             Swal.fire({ toast: true, icon: 'success', title: showPinLabels ? 'เปิดแสดงป้ายชื่อ' : 'ปิดแสดงป้ายชื่อ', timer: 1500, showConfirmButton: false });
         }
 
-        function saveCloudinarySettings() {
-            const cloudName = document.getElementById('config-cloudinary-cloud-name').value.trim();
-            const uploadPreset = document.getElementById('config-cloudinary-upload-preset').value.trim();
 
-            localStorage.setItem('survey_cloudinary_cloud_name', cloudName);
-            localStorage.setItem('survey_cloudinary_upload_preset', uploadPreset);
-            cloudinaryCloudName = cloudName;
-            cloudinaryUploadPreset = uploadPreset;
-
-            Swal.fire('บันทึกสำเร็จ', 'อัปเดตข้อมูลตั้งค่า Cloudinary แล้ว', 'success');
-        }
 
         function renderImageGallery(images, editable) {
             const container = document.getElementById('image-gallery-container');
@@ -1411,8 +2052,14 @@
         window.copyUserCode = copyUserCode;
         window.addCat = addCat;
         window.clearAll = clearAll;
-        window.doExport = doExport;
         window.triggerCamera = triggerCamera;
         window.handleImageUpload = handleImageUpload;
-        window.saveCloudinarySettings = saveCloudinarySettings;
+        window.resetGps = resetGps;
         window.openSheetFromSearch = openSheetFromSearch;
+        window.handleLogout = handleLogout;
+        window.openExportCalendarModal = openExportCalendarModal;
+        window.closeExportCalendarModal = closeExportCalendarModal;
+        window.navigateExportCalendar = navigateExportCalendar;
+        window.selectExportDate = selectExportDate;
+        window.confirmExportCalendar = confirmExportCalendar;
+        window.closeImportMappingModal = closeImportMappingModal;

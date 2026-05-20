@@ -431,6 +431,10 @@
             color: white !important;
         }
 
+        .swal2-container {
+            z-index: 99999 !important;
+        }
+
         #sheet {
             position: absolute;
             bottom: 0;
@@ -640,6 +644,12 @@
                         class="w-full p-3 border border-gray-300 rounded-xl bg-white outline-none focus:border-green-500"
                         disabled></textarea>
                 </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500 ml-1">เนื้อที่แปลงที่ดิน</label>
+                    <input type="text" id="sheet-area"
+                        class="w-full p-3 border border-gray-300 rounded-xl bg-gray-50 outline-none"
+                        disabled>
+                </div>
 
                 <!-- Cloudinary Image Gallery & Camera Upload -->
                 <div class="space-y-2">
@@ -808,9 +818,6 @@
                 <button onclick="switchSettingsTab('geojson')" id="stab-geojson" class="tab-btn flex-1">
                     <i class="fa-solid fa-globe mr-1"></i> ลิงก์ GeoJSON
                 </button>
-                <button onclick="switchSettingsTab('cloudinary')" id="stab-cloudinary" class="tab-btn flex-1">
-                    <i class="fa-solid fa-cloud-arrow-up mr-1"></i> Cloudinary
-                </button>
             </div>
 
             <!-- Modal Body Content -->
@@ -819,9 +826,25 @@
                 <!-- Tab Profile -->
                 <div id="scontent-profile" class="tab-content space-y-4">
                     <div class="p-4 border border-blue-100 rounded-2xl bg-blue-50/20">
-                        <div class="text-[10px] font-bold text-gray-400">ผู้ใช้งานปัจจุบัน</div>
-                        <div class="text-base font-bold text-gray-850" id="profile-display-name">-</div>
-                        <div class="text-xs text-gray-500" id="profile-email">-</div>
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <div class="text-[10px] font-bold text-gray-400">ผู้ใช้งานปัจจุบัน</div>
+                                <div class="text-base font-bold text-gray-850 animate-fade-in" id="profile-display-name">-</div>
+                                <div class="text-xs text-gray-500 mb-1" id="profile-email">-</div>
+                                <div class="flex items-center gap-1.5 mt-2">
+                                    <span class="text-[10px] font-bold text-gray-400">GPS:</span>
+                                    <div id="profile-gps-status">
+                                        <span class="inline-flex items-center text-xs font-semibold text-red-650 bg-red-50 px-2 py-0.5 rounded-full">
+                                            <i class="fa-solid fa-circle text-[6px] mr-1"></i> ไม่ได้รับอนุญาต / ปิดอยู่
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <button onclick="resetGps()"
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center gap-1">
+                                <i class="fa-solid fa-location-crosshairs"></i> Reset GPS
+                            </button>
+                        </div>
 
                         <div class="mt-4 pt-4 border-t border-gray-100/50 flex justify-between items-center">
                             <div>
@@ -858,9 +881,9 @@
                     </div>
 
                     <div class="flex gap-2 pt-2">
-                        <button onclick="leaveTeam()"
+                        <button onclick="handleLogout()"
                             class="w-full border border-red-200 text-red-600 py-3 rounded-xl text-xs font-bold bg-red-50/50 hover:bg-red-50 transition">
-                            <i class="fa-solid fa-right-from-bracket mr-1"></i> ออกจากทีมเพื่อทำงานคนเดียว
+                            <i class="fa-solid fa-right-from-bracket mr-1"></i> ออกจากระบบ
                         </button>
                     </div>
                 </div>
@@ -892,10 +915,10 @@
                                 <label class="text-[10px] font-bold text-gray-400 block mb-1">ส่งออกงาน
                                     (เสร็จแล้ว)</label>
                                 <div class="flex justify-center gap-1.5">
-                                    <button onclick="doExport('xlsx')"
-                                        class="bg-green-600 text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-green-700">Excel</button>
-                                    <button onclick="doExport('kml')"
-                                        class="bg-blue-600 text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-blue-700">KML</button>
+                                    <button onclick="openExportCalendarModal('excel')"
+                                        class="bg-green-600 text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-green-700 w-full">Excel</button>
+                                    <button onclick="openExportCalendarModal('report')"
+                                        class="bg-blue-600 text-white px-2.5 py-1 rounded text-xs font-bold hover:bg-blue-700 w-full">ออกรายงาน</button>
                                 </div>
                             </div>
                             <div class="p-3 border rounded-xl bg-gray-50 flex flex-col justify-between">
@@ -909,37 +932,118 @@
                         </div>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
 
-                <!-- Tab Config -->
-
-                <!-- Tab Cloudinary -->
-                <div id="scontent-cloudinary" class="tab-content hidden space-y-4">
-                    <div class="p-4 border border-blue-150 rounded-2xl bg-blue-50/20 space-y-3">
-                        <h3 class="text-xs font-bold text-blue-800 flex items-center gap-1">
-                            <i class="fa-solid fa-cloud-arrow-up"></i> ตั้งค่า Cloudinary รูปถ่าย
-                        </h3>
-                        <p class="text-[11px] text-gray-600 leading-relaxed">ระบุ Cloud Name และ Upload Preset ของท่านเพื่อเปิดการใช้งานการถ่ายภาพ/อัปโหลดภาพประกอบหมุดสำรวจ</p>
-                        <div class="space-y-3">
-                            <div>
-                                <label class="text-[10px] font-bold text-gray-500 block">Cloud Name</label>
-                                <input type="text" id="config-cloudinary-cloud-name"
-                                    placeholder="เช่น: dmycompany"
-                                    class="w-full mt-1 p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                            </div>
-                            <div>
-                                <label class="text-[10px] font-bold text-gray-500 block">Upload Preset</label>
-                                <input type="text" id="config-cloudinary-upload-preset"
-                                    placeholder="เช่น: survey_preset"
-                                    class="w-full mt-1 p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                            </div>
-                        </div>
-                        <button onclick="saveCloudinarySettings()"
-                            class="w-full bg-blue-600 text-white py-3 rounded-xl font-bold text-xs hover:bg-blue-700 active:scale-95 transition flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-floppy-disk text-sm"></i> บันทึกการตั้งค่า Cloudinary
-                        </button>
-                    </div>
+    <!-- Export Calendar Modal -->
+    <div id="export-calendar-modal" class="fixed inset-0 bg-black/50 z-[9999] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 relative">
+            <h3 id="export-calendar-title" class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                <i class="fa-solid fa-calendar-days text-blue-600"></i> เลือกวันที่ต้องการส่งออก
+            </h3>
+            
+            <!-- Calendar Navigation -->
+            <div class="flex items-center justify-between">
+                <button onclick="navigateExportCalendar(-1)" class="p-2 hover:bg-gray-100 rounded-full transition">
+                    <i class="fa-solid fa-chevron-left text-xs text-gray-600"></i>
+                </button>
+                <span id="cal-month-year" class="text-xs font-bold text-gray-700">-</span>
+                <button onclick="navigateExportCalendar(1)" class="p-2 hover:bg-gray-100 rounded-full transition">
+                    <i class="fa-solid fa-chevron-right text-xs text-gray-600"></i>
+                </button>
+            </div>
+            
+            <!-- Calendar Grid -->
+            <div>
+                <!-- Weekdays -->
+                <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-gray-400 mb-2">
+                    <div>อา</div><div>จ</div><div>อ</div><div>พ</div><div>พฤ</div><div>ศ</div><div>ส</div>
                 </div>
+                <!-- Days grid -->
+                <div id="cal-days-grid" class="grid grid-cols-7 gap-1.5 text-center text-xs">
+                    <!-- Dynamic Days -->
+                </div>
+            </div>
+            
+            <!-- Selected Date Action -->
+            <div id="cal-action-container" class="hidden p-3 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-center justify-between">
+                <div>
+                    <div class="text-[9px] font-bold text-blue-500">วันที่เลือก</div>
+                    <div id="cal-selected-display" class="text-xs font-bold text-gray-800">-</div>
+                </div>
+                <button onclick="confirmExportCalendar()" class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition">
+                    ยืนยันเลือกวัน
+                </button>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="grid grid-cols-2 gap-3 pt-2">
+                <button onclick="confirmExportCalendar(true)" class="bg-gray-100 text-gray-700 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-200 transition">
+                    ส่งออกทั้งหมด
+                </button>
+                <button onclick="closeExportCalendarModal()" class="border border-gray-200 text-gray-500 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-50 transition">
+                    ยกเลิก
+                </button>
+            </div>
+        </div>
+    </div>
 
+    <!-- Import Mapping Modal -->
+    <div id="import-mapping-modal" class="fixed inset-0 bg-black/50 z-[9999] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 relative">
+            <h3 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                <i class="fa-solid fa-map-location-dot text-blue-600"></i> กำหนดการเชื่อมโยงฟิลด์นำเข้า
+            </h3>
+            
+            <p class="text-[11px] text-gray-500 leading-relaxed">
+                ระบบตรวจพบข้อมูลคุณสมบัติในแผนที่ กรุณาเลือกฟิลด์ที่จะนำไปใช้แสดงและจัดเก็บในระบบ:
+            </p>
+            
+            <div class="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">0. ไอดี (แสดง ชื่อแปลงเลขทะเบียน)</label>
+                    <select id="map-field-id" class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">1. เชื่อมโยงช่องค้นหา</label>
+                    <select id="map-field-search" class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">2. เชื่อมโยง อำเภอ (Amphoe) ทั้งหมด</label>
+                    <select id="map-field-amphoe" class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">3. เชื่อมโยง ตำบล (Tambon) ทั้งหมด</label>
+                    <select id="map-field-tambon" class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+                
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">4. เชื่อมโยง เนื้อที่ (Area)</label>
+                    <select id="map-field-area" class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-3 pt-2">
+                <button id="btn-confirm-import" class="bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
+                    ยืนยันนำเข้าข้อมูล
+                </button>
+                <button onclick="closeImportMappingModal()" class="border border-gray-200 text-gray-500 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-50 transition">
+                    ยกเลิก
+                </button>
             </div>
         </div>
     </div>
