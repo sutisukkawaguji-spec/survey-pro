@@ -1167,29 +1167,58 @@ async function importData(input) {
 
 async function saveData() {
     const job = dbJobs.find(j => j.id === selectedJobId);
-    if (job) {
-        if (isNavigating) await stopNav();
+    if (!job) return;
 
-        showLoading(true, 'กำลังบันทึกข้อมูล...');
-        try {
-            job.status = 'done';
-            job.properties.name = document.getElementById('sheet-name').value;
-            job.properties.note = document.getElementById('sheet-note').value;
-            job.properties.date = new Date().toISOString().split('T')[0];
-            if (!job.properties) job.properties = {};
-            job.properties.navigator_id = null;
-            job.properties.navigator_name = null;
+    if (isNavigating) await stopNav();
 
-            await saveJobToSupabase(job);
+    showLoading(true, 'กำลังอัปโหลดรูปภาพและบันทึกข้อมูล...');
+    try {
+        // --- ส่วนที่ 1: ตรวจสอบและอัปโหลดรูปภาพใหม่ (ที่มีสถานะ isTemp) ---
+        if (job.properties.images && job.properties.images.length > 0) {
+            for (let i = 0; i < job.properties.images.length; i++) {
+                let img = job.properties.images[i];
 
-            renderMap();
-            closeSheet();
-            Swal.fire({ toast: true, icon: 'success', title: 'บันทึกข้อมูลเรียบร้อย', timer: 1000, showConfirmButton: false });
-        } catch (e) {
-            Swal.fire('บันทึกล้มเหลว', e.message, 'error');
-        } finally {
-            showLoading(false);
+                if (img.isTemp && img.file) {
+                    const formData = new FormData();
+                    formData.append('file', img.file);
+                    formData.append('upload_preset', cloudinaryUploadPreset);
+
+                    const url = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`;
+                    const res = await fetch(url, { method: 'POST', body: formData });
+
+                    if (!res.ok) throw new Error('อัปโหลดภาพไปยังคลาวด์ล้มเหลว');
+
+                    const data = await res.json();
+
+                    // เปลี่ยนจากรูปชั่วคราว ให้เป็นรูปจริงที่มีลิงก์จาก Cloudinary
+                    job.properties.images[i] = {
+                        url: data.secure_url,
+                        public_id: data.public_id,
+                        delete_token: data.delete_token,
+                        uploadedAt: Date.now()
+                    };
+                }
+            }
         }
+
+        // --- ส่วนที่ 2: บันทึกข้อมูลข้อความลงฐานข้อมูล Supabase ---
+        job.status = 'done';
+        job.properties.name = document.getElementById('sheet-name').value;
+        job.properties.note = document.getElementById('sheet-note').value;
+        job.properties.date = new Date().toISOString().split('T')[0];
+        job.properties.navigator_id = null;
+        job.properties.navigator_name = null;
+
+        await saveJobToSupabase(job);
+
+        renderMap();
+        closeSheet();
+        Swal.fire({ toast: true, icon: 'success', title: 'บันทึกข้อมูลเรียบร้อย', timer: 1500, showConfirmButton: false });
+    } catch (e) {
+        console.error("Save Data Error:", e);
+        Swal.fire('บันทึกล้มเหลว', e.message, 'error');
+    } finally {
+        showLoading(false);
     }
 }
 
@@ -2228,44 +2257,23 @@ async function handleImageUpload(event) {
 
     for (let file of files) {
         if (job.properties.images.length >= 6) {
-            Swal.fire('อัปโหลดครบกำหนด', 'สามารถอัปโหลดได้สูงสุด 6 รูปเท่านั้น รูปที่เหลือจะไม่ถูกอัปโหลด', 'warning');
+            Swal.fire('ข้อจำกัด', 'สามารถอัปโหลดได้สูงสุด 6 รูปเท่านั้น', 'warning');
             break;
         }
 
-        showGalleryUploadingPlaceholder();
+        // 1. สร้าง URL ชั่วคราวเพื่อแสดงพรีวิวภาพบนหน้าจอทันที
+        const tempUrl = URL.createObjectURL(file);
 
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('upload_preset', cloudinaryUploadPreset);
-
-        try {
-            const url = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/upload`;
-            const res = await fetch(url, {
-                method: 'POST',
-                body: formData
-            });
-
-            if (!res.ok) {
-                const errData = await res.json();
-                throw new Error(errData.error?.message || 'อัปโหลดภาพล้มเหลว');
-            }
-
-            const data = await res.json();
-
-            job.properties.images.push({
-                url: data.secure_url,
-                public_id: data.public_id,
-                delete_token: data.delete_token,
-                uploadedAt: Date.now()
-            });
-
-            renderImageGallery(job.properties.images, true);
-        } catch (err) {
-            Swal.fire('เกิดข้อผิดพลาดในการอัปโหลด', err.message, 'error');
-            renderImageGallery(job.properties.images, true);
-        }
+        // 2. เก็บไฟล์จริงไว้ใน Array โดยมีตัวแปร isTemp: true รอส่งไป Cloudinary
+        job.properties.images.push({
+            url: tempUrl,
+            isTemp: true,
+            file: file
+        });
     }
 
+    // อัปเดตแกลเลอรีภาพบนหน้าจอ (รูปจะโชว์ขึ้นมาทันที)
+    renderImageGallery(job.properties.images, true);
     originalInput.value = '';
 }
 
@@ -2296,7 +2304,7 @@ async function deleteJobImage(idx) {
 
     Swal.fire({
         title: 'ยืนยันลบรูปถ่าย?',
-        text: 'รูปนี้จะถูกลบออกจากข้อมูลแปลงสำรวจ',
+        text: 'รูปนี้จะถูกลบออก',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#ef4444',
@@ -2304,42 +2312,44 @@ async function deleteJobImage(idx) {
         cancelButtonText: 'ยกเลิก'
     }).then(async (r) => {
         if (r.isConfirmed) {
-            showLoading(true, 'กำลังส่งคำสั่งลบ...'); // เพิ่มโหลดดิ้งกันเหนียว
-
-            if (img.public_id) {
-                try {
+            showLoading(true, 'กำลังลบรูปภาพ...');
+            try {
+                // กรณีที่ 1: เป็นรูปพรีวิว (ผู้ใช้เพิ่งเลือก แต่ยังไม่ได้กดเซฟ) 
+                // -> ลบจากหน้าจอได้เลย ไม่ต้องวิ่งไปกวนหลังบ้าน
+                if (img.isTemp) {
+                    URL.revokeObjectURL(img.url); // คืนพื้นที่หน่วยความจำให้มือถือ
+                    job.properties.images.splice(idx, 1);
+                    renderImageGallery(job.properties.images, true);
+                    Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปพรีวิวทิ้งแล้ว', timer: 1000, showConfirmButton: false });
+                }
+                // กรณีที่ 2: เป็นรูปที่อัปโหลดขึ้น Cloudinary ไปแล้ว (มี public_id)
+                else if (img.public_id) {
                     // ⚠️ วาง URL ของ Google Apps Script ที่ช่องนี้
-                    const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYmkufBM6TGiY0TwSqI-Eq6RrTZBevQZqaBbs9IPZsAyBypBFXfvsXojkeVKcaoskb/exec";
+                    const GAS_WEBAPP_URL = "วาง_URL_ที่ได้จาก_Google_Apps_Script_ตรงนี้";
 
                     const response = await fetch(GAS_WEBAPP_URL, {
                         method: 'POST',
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                         body: JSON.stringify({ publicId: img.public_id })
                     });
 
-                    const data = await response.json(); // อ่านผลลัพธ์ที่ตอบกลับมา
+                    const rawText = await response.text();
+                    const data = JSON.parse(rawText);
 
-                    // เช็กว่า Cloudinary ยอมให้ลบไหม
                     if (data.success && data.result && data.result.result === "ok") {
-                        // ถ้าลบสำเร็จ ให้เคลียร์รูปออกจากหน้าจอ
                         job.properties.images.splice(idx, 1);
                         renderImageGallery(job.properties.images, true);
-                        Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปออกจากระบบและคลาวด์แล้ว', timer: 1500, showConfirmButton: false });
+                        Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปออกจากคลาวด์แล้ว', timer: 1500, showConfirmButton: false });
                     } else {
-                        // 🚨 ถ้าลบไม่สำเร็จ จะมี Popup สีแดงเด้งบอกสาเหตุตรงนี้เลย!
                         Swal.fire('Cloudinary ปฏิเสธการลบ', JSON.stringify(data), 'error');
                     }
-                } catch (e) {
-                    console.error("เชื่อมต่อระบบล้มเหลว", e);
-                    Swal.fire('เชื่อมต่อหลังบ้านล้มเหลว', e.message, 'error');
                 }
-            } else {
-                // กรณีเป็นรูปเก่าที่ไม่มี public_id (ลบแค่ในระบบหน้าจอ)
-                job.properties.images.splice(idx, 1);
-                renderImageGallery(job.properties.images, true);
-                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปถ่ายแล้ว', timer: 1500, showConfirmButton: false });
+            } catch (e) {
+                console.error("ระบบลบภาพล้มเหลว", e);
+                Swal.fire('ล้มเหลว', e.message, 'error');
+            } finally {
+                showLoading(false);
             }
-
-            showLoading(false); // ปิดโหลดดิ้ง
         }
     });
 }
