@@ -493,6 +493,7 @@ function getFilteredJobs() {
     const search = document.getElementById('inp-search').value.toLowerCase().trim();
     const amphoe = document.getElementById('sel-amphoe').value;
     const tambon = document.getElementById('sel-tambon').value;
+
     return dbJobs.filter(j => {
         const matchCat = j.category === currentUser.category;
         const p = j.properties || {};
@@ -500,18 +501,11 @@ function getFilteredJobs() {
 
         let matchS = txt === "";
         if (!matchS) {
+            // เช็กข้อมูลจาก 3 ส่วน: ID ป้าย (name), ช่องเชื่อมโยง (search_field) และ หมายเหตุ (note)
             if ((p.name || "").toString().toLowerCase().includes(txt) ||
-                (p.note || "").toString().toLowerCase().includes(txt) ||
-                (p.search_field || "").toString().toLowerCase().includes(txt)) {
+                (p.search_field || "").toString().toLowerCase().includes(txt) ||
+                (p.note || "").toString().toLowerCase().includes(txt)) {
                 matchS = true;
-            } else {
-                // ค้นหาในทุกคีย์ของคุณสมบัติทั้งหมด (ตรวจจับฟิลด์ที่นำเข้ามาเพิ่มความยืดหยุ่น)
-                for (let key in p) {
-                    if (p[key] && typeof p[key] !== 'object' && p[key].toString().toLowerCase().includes(txt)) {
-                        matchS = true;
-                        break;
-                    }
-                }
             }
         }
 
@@ -519,6 +513,7 @@ function getFilteredJobs() {
         const valT = (p.tambon || p.TUMB_NAME || p.TAMBON || p.subdistrict || "").toString().trim();
         const matchA = amphoe === "" || valA === amphoe;
         const matchT = tambon === "" || valT === tambon;
+
         return matchCat && matchS && matchA && matchT;
     });
 }
