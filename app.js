@@ -210,6 +210,33 @@
             }
         }
 
+        async function syncJobsSilently() {
+            if (!supabaseClient || !currentUser || isNavigating) return;
+            try {
+                const { data, error } = await supabaseClient
+                    .from('jobs')
+                    .select('*')
+                    .order('updated_at', { ascending: false });
+
+                if (!error && data) {
+                    dbJobs = data;
+                    renderMap(false);
+                    if (selectedJobId) {
+                        const currentOpenJob = dbJobs.find(j => j.id === selectedJobId);
+                        if (currentOpenJob) {
+                            const nameActive = document.activeElement === document.getElementById('sheet-name');
+                            const noteActive = document.activeElement === document.getElementById('sheet-note');
+                            if (!nameActive && !noteActive) {
+                                openSheetSilently(currentOpenJob);
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error("Silent sync error", e);
+            }
+        }
+
         async function saveJobToSupabase(job) {
             if (!supabaseClient || !currentUser) return;
             const { error } = await supabaseClient
@@ -274,6 +301,9 @@
 
             initApp();
             await checkAuthSession();
+
+            // เริ่ม Polling ข้อมูลในทีมเงียบ ๆ ทุก 10 วินาที
+            setInterval(syncJobsSilently, 10000);
         }
 
         if (document.readyState === 'complete' || document.readyState === 'interactive') {
@@ -459,6 +489,20 @@
                 }
                 if (layer) {
                     layer.jobId = job.id;
+                    if (job.status === 'navigating') {
+                        layer.on('add', () => {
+                            if (typeof layer.getElement === 'function') {
+                                layer.getElement()?.classList.add('job-navigating-pulse');
+                            }
+                            if (typeof layer.eachLayer === 'function') {
+                                layer.eachLayer(sub => {
+                                    if (typeof sub.getElement === 'function') {
+                                        sub.getElement()?.classList.add('job-navigating-pulse');
+                                    }
+                                });
+                            }
+                        });
+                    }
                     if (isNavigating && job.id !== selectedJobId) {
                         layer.on('add', () => {
                             if (typeof layer.getElement === 'function') {
@@ -517,7 +561,7 @@
             }
         }
 
-        function startNav() {
+        async function startNav() {
             if (!userMarker) return Swal.fire('GPS ไม่พร้อม', '', 'warning');
             const job = dbJobs.find(j => j.id === selectedJobId);
             if (!job) return;
@@ -528,6 +572,16 @@
             isNavigating = true;
             job.prevStatus = job.status;
             job.status = 'navigating';
+            if (!job.properties) job.properties = {};
+            job.properties.navigator_id = currentUser.id;
+            job.properties.navigator_name = currentUser.name;
+
+            try {
+                await saveJobToSupabase(job);
+            } catch (e) {
+                console.error("Failed to save navigation state to Supabase", e);
+            }
+
             renderMap();
             map.fitBounds(L.latLngBounds([userMarker.getLatLng(), [job.lat, job.lng]]), { padding: [100, 100] });
 
@@ -549,7 +603,7 @@
                 speak("เริ่มการนำทาง");
 
                 if (navInterval) clearInterval(navInterval);
-                navInterval = setInterval(() => {
+                navInterval = setInterval(async () => {
                     if (!userMarker) return;
                     const d = map.distance(userMarker.getLatLng(), [job.lat, job.lng]);
                     
@@ -563,7 +617,7 @@
 
                     if (d < 100) {
                         speak("ถึงที่หมายแล้ว");
-                        stopNav();
+                        await stopNav();
                         document.getElementById('sheet').classList.remove('minimized');
                         document.getElementById('sheet').classList.add('active');
                         Swal.fire({ toast: true, icon: 'success', title: 'ถึงแล้ว!', text: 'กรอกข้อมูลได้เลย', timer: 2000, showConfirmButton: false });
@@ -572,7 +626,7 @@
             } catch (e) { }
         }
 
-        function stopNav() {
+        async function stopNav() {
             isNavigating = false;
             if (routingControl) {
                 try { map.removeControl(routingControl); } catch (e) { }
@@ -582,7 +636,17 @@
             document.getElementById('btn-nav-start').classList.remove('hidden');
             document.getElementById('btn-nav-cancel').classList.add('hidden');
             const job = dbJobs.find(j => j.id === selectedJobId);
-            if (job) job.status = job.prevStatus || 'done';
+            if (job) {
+                job.status = job.prevStatus || 'waiting';
+                if (!job.properties) job.properties = {};
+                job.properties.navigator_id = null;
+                job.properties.navigator_name = null;
+                try {
+                    await saveJobToSupabase(job);
+                } catch (e) {
+                    console.error("Failed to save stop navigation state to Supabase", e);
+                }
+            }
             renderMap();
         }
 
@@ -600,21 +664,57 @@
 
             const btnSave = document.getElementById('btn-save');
             const btnEdit = document.getElementById('btn-edit');
+            const btnNavStart = document.getElementById('btn-nav-start');
+            const btnNavCancel = document.getElementById('btn-nav-cancel');
+            const btnDelete = document.getElementById('btn-delete-job');
+            const navWarning = document.getElementById('sheet-nav-warning');
+            const navWarningText = document.getElementById('sheet-nav-warning-text');
 
+            const isNavByOther = job.status === 'navigating' && p.navigator_id && p.navigator_id !== currentUser.id;
             const isDone = job.status === 'done';
-            if (isDone) {
-                btnSave.classList.add('hidden');
-                btnEdit.classList.remove('hidden');
-                toggleInputs(false);
-            } else {
-                btnSave.classList.remove('hidden');
-                btnEdit.classList.add('hidden');
-                toggleInputs(true);
-            }
 
-            // Render images gallery
-            const images = p.images || [];
-            renderImageGallery(images, !isDone);
+            if (isNavByOther) {
+                // Locked by another user
+                if (navWarning && navWarningText) {
+                    navWarningText.innerText = `🔴 ${p.navigator_name || 'เพื่อนร่วมทีม'} กำลังนำทางไปยังแปลงนี้ (ไม่อนุญาตให้แก้ไข/เลือก)`;
+                    navWarning.classList.remove('hidden');
+                }
+                btnNavStart.classList.add('hidden');
+                btnNavCancel.classList.add('hidden');
+                btnSave.classList.add('hidden');
+                btnEdit.classList.add('hidden');
+                if (btnDelete) btnDelete.classList.add('hidden');
+                toggleInputs(false);
+                renderImageGallery(p.images || [], false);
+            } else {
+                // Not locked by others
+                if (navWarning) navWarning.classList.add('hidden');
+                if (btnDelete) btnDelete.classList.remove('hidden');
+
+                if (isDone) {
+                    btnSave.classList.add('hidden');
+                    btnEdit.classList.remove('hidden');
+                    btnNavStart.classList.add('hidden');
+                    btnNavCancel.classList.add('hidden');
+                    toggleInputs(false);
+                    renderImageGallery(p.images || [], false);
+                } else {
+                    btnSave.classList.remove('hidden');
+                    btnEdit.classList.add('hidden');
+                    
+                    const isNavByMe = isNavigating && job.id === selectedJobId;
+                    if (isNavByMe) {
+                        btnNavStart.classList.add('hidden');
+                        btnNavCancel.classList.remove('hidden');
+                    } else {
+                        btnNavStart.classList.remove('hidden');
+                        btnNavCancel.classList.add('hidden');
+                    }
+                    
+                    toggleInputs(true);
+                    renderImageGallery(p.images || [], true);
+                }
+            }
 
             document.getElementById('fab-container').classList.add('sheet-open');
             document.getElementById('sheet').classList.remove('minimized');
@@ -629,6 +729,73 @@
             
             const btnCamera = document.getElementById('btn-camera');
             if (btnCamera) btnCamera.disabled = !enabled;
+        }
+
+        function openSheetSilently(job) {
+            const p = job.properties;
+            document.getElementById('sheet-title').innerText = p.name || 'รายละเอียด';
+            document.getElementById('sheet-meta').innerText = `${p.amphoe || p.AMPH_NAME || '-'} / ${p.tambon || p.TUMB_NAME || '-'}`;
+            
+            const nameEl = document.getElementById('sheet-name');
+            const noteEl = document.getElementById('sheet-note');
+            if (document.activeElement !== nameEl) nameEl.value = p.name || '';
+            if (document.activeElement !== noteEl) noteEl.value = p.note || '';
+            
+            if (document.getElementById('sheet-area')) {
+                document.getElementById('sheet-area').value = p.area || '-';
+            }
+
+            const btnSave = document.getElementById('btn-save');
+            const btnEdit = document.getElementById('btn-edit');
+            const btnNavStart = document.getElementById('btn-nav-start');
+            const btnNavCancel = document.getElementById('btn-nav-cancel');
+            const btnDelete = document.getElementById('btn-delete-job');
+            const navWarning = document.getElementById('sheet-nav-warning');
+            const navWarningText = document.getElementById('sheet-nav-warning-text');
+
+            const isNavByOther = job.status === 'navigating' && p.navigator_id && p.navigator_id !== currentUser.id;
+            const isDone = job.status === 'done';
+
+            if (isNavByOther) {
+                if (navWarning && navWarningText) {
+                    navWarningText.innerText = `🔴 ${p.navigator_name || 'เพื่อนร่วมทีม'} กำลังนำทางไปยังแปลงนี้ (ไม่อนุญาตให้แก้ไข/เลือก)`;
+                    navWarning.classList.remove('hidden');
+                }
+                btnNavStart.classList.add('hidden');
+                btnNavCancel.classList.add('hidden');
+                btnSave.classList.add('hidden');
+                btnEdit.classList.add('hidden');
+                if (btnDelete) btnDelete.classList.add('hidden');
+                toggleInputs(false);
+                renderImageGallery(p.images || [], false);
+            } else {
+                if (navWarning) navWarning.classList.add('hidden');
+                if (btnDelete) btnDelete.classList.remove('hidden');
+
+                if (isDone) {
+                    btnSave.classList.add('hidden');
+                    btnEdit.classList.remove('hidden');
+                    btnNavStart.classList.add('hidden');
+                    btnNavCancel.classList.add('hidden');
+                    toggleInputs(false);
+                    renderImageGallery(p.images || [], false);
+                } else {
+                    btnSave.classList.remove('hidden');
+                    btnEdit.classList.add('hidden');
+                    
+                    const isNavByMe = isNavigating && job.id === selectedJobId;
+                    if (isNavByMe) {
+                        btnNavStart.classList.add('hidden');
+                        btnNavCancel.classList.remove('hidden');
+                    } else {
+                        btnNavStart.classList.remove('hidden');
+                        btnNavCancel.classList.add('hidden');
+                    }
+                    
+                    toggleInputs(true);
+                    renderImageGallery(p.images || [], true);
+                }
+            }
         }
 
         function enableEdit() {
@@ -658,7 +825,7 @@
 
         function findNearestNewJob() {
             if (!userMarker) return Swal.fire('รอ GPS', '', 'info');
-            const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done');
+            const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating');
             if (filteredJobs.length === 0) return Swal.fire('ยอดเยี่ยม', 'ไม่มีงานค้างในพื้นที่นี้', 'success');
             let min = Infinity, near = null;
             const u = userMarker.getLatLng();
@@ -902,7 +1069,7 @@
         async function saveData() {
             const job = dbJobs.find(j => j.id === selectedJobId);
             if (job) {
-                if (isNavigating) stopNav();
+                if (isNavigating) await stopNav();
 
                 showLoading(true, 'กำลังบันทึกข้อมูล...');
                 try {
@@ -910,6 +1077,9 @@
                     job.properties.name = document.getElementById('sheet-name').value;
                     job.properties.note = document.getElementById('sheet-note').value;
                     job.properties.date = new Date().toISOString().split('T')[0];
+                    if (!job.properties) job.properties = {};
+                    job.properties.navigator_id = null;
+                    job.properties.navigator_name = null;
 
                     await saveJobToSupabase(job);
 
