@@ -247,20 +247,41 @@ async function syncJobsFromDB() {
     if (!supabaseClient || !currentUser) return;
     showLoading(true, 'กำลังโหลดข้อมูลแปลงสำรวจ...');
     try {
-        const { data, error } = await supabaseClient
-            .from('jobs')
-            .select('*')
-            .order('updated_at', { ascending: false });
+        let allJobs = [];
+        let from = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (error) throw error;
+        while (hasMore) {
+            const { data, error } = await supabaseClient
+                .from('jobs')
+                .select('*')
+                .order('updated_at', { ascending: false })
+                .range(from, from + limit - 1);
 
-        dbJobs = data || [];
+            if (error) throw error;
 
-        // Scan data for unique categories and merge/register them
-        const dbCategories = new Set(categories);
+            if (data && data.length > 0) {
+                allJobs = allJobs.concat(data);
+                from += data.length;
+                if (data.length < limit) {
+                    hasMore = false;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        dbJobs = allJobs;
+
+        // Scan data for unique categories and merge/register them (auto-pruning)
+        const dbCategories = new Set(['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน']);
         dbJobs.forEach(j => {
             if (j.category) dbCategories.add(j.category);
         });
+        if (currentUser && currentUser.category) {
+            dbCategories.add(currentUser.category);
+        }
         categories = Array.from(dbCategories);
         localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
         
@@ -280,12 +301,34 @@ async function syncJobsFromDB() {
 async function syncJobsSilently() {
     if (!supabaseClient || !currentUser || isNavigating || isMapClickBlocked) return;
     try {
-        const { data, error } = await supabaseClient
-            .from('jobs')
-            .select('*')
-            .order('updated_at', { ascending: false });
+        let allJobs = [];
+        let from = 0;
+        const limit = 1000;
+        let hasMore = true;
 
-        if (!error && data) {
+        while (hasMore) {
+            const { data, error } = await supabaseClient
+                .from('jobs')
+                .select('*')
+                .order('updated_at', { ascending: false })
+                .range(from, from + limit - 1);
+
+            if (error) throw error;
+
+            if (data && data.length > 0) {
+                allJobs = allJobs.concat(data);
+                from += data.length;
+                if (data.length < limit) {
+                    hasMore = false;
+                }
+            } else {
+                hasMore = false;
+            }
+        }
+
+        const data = allJobs;
+
+        if (data) {
             // ป้องกันการล้างข้อมูลที่กำลังพิมพ์หรือรูปถ่ายพรีวิวที่กำลังเลือกค้างอยู่ขณะซิงค์ในพื้นหลัง (Background Sync)
             if (selectedJobId) {
                 const localJob = dbJobs.find(j => j.id === selectedJobId);
@@ -305,11 +348,14 @@ async function syncJobsSilently() {
 
             dbJobs = data;
 
-            // Scan data for unique categories and merge/register them
-            const dbCategories = new Set(categories);
+            // Scan data for unique categories and merge/register them (auto-pruning)
+            const dbCategories = new Set(['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน']);
             dbJobs.forEach(j => {
                 if (j.category) dbCategories.add(j.category);
             });
+            if (currentUser && currentUser.category) {
+                dbCategories.add(currentUser.category);
+            }
             const oldLength = categories.length;
             categories = Array.from(dbCategories);
             if (categories.length !== oldLength) {
@@ -585,23 +631,25 @@ function updateUserInfo() {
     document.getElementById('profile-email').innerText = currentUser.email || '-';
     document.getElementById('profile-user-code').innerText = currentUser.user_code || '------';
     
-    // Populate profile category select dropdown
+    // Populate profile category select dropdown (only reading from active imported map categories)
     const selProfileCat = document.getElementById('sel-profile-category');
     if (selProfileCat) {
         selProfileCat.innerHTML = '';
-        categories.forEach(cat => {
+        
+        let activeCats = Array.from(new Set(dbJobs.map(j => j.category).filter(Boolean)));
+        if (!activeCats.includes('ทั่วไป')) {
+            activeCats.push('ทั่วไป');
+        }
+        const currentCat = currentUser.category || 'ทั่วไป';
+        if (!activeCats.includes(currentCat)) {
+            activeCats.push(currentCat);
+        }
+        
+        activeCats.sort();
+
+        activeCats.forEach(cat => {
             selProfileCat.innerHTML += `<option value="${cat}">${cat}</option>`;
         });
-        selProfileCat.innerHTML += '<option value="CUSTOM_NEW">-- พิมพ์ระบุประเภทงานใหม่ --</option>';
-        
-        // If current user category is not in categories list, prepend it
-        const currentCat = currentUser.category || 'ทั่วไป';
-        if (!categories.includes(currentCat)) {
-            const option = document.createElement('option');
-            option.value = currentCat;
-            option.text = currentCat;
-            selProfileCat.insertBefore(option, selProfileCat.lastChild);
-        }
         selProfileCat.value = currentCat;
     }
     
@@ -616,24 +664,12 @@ function updateUserInfo() {
 
 function saveProfileCategory() {
     const selProfileCat = document.getElementById('sel-profile-category');
-    const catInput = document.getElementById('inp-profile-category');
     if (!selProfileCat) return;
 
-    let newCat = selProfileCat.value;
-    if (newCat === 'CUSTOM_NEW') {
-        if (!catInput) return;
-        newCat = catInput.value.trim();
-    }
-
+    const newCat = selProfileCat.value;
     if (!newCat) {
         Swal.fire('คำเตือน', 'กรุณาระบุหรือเลือกประเภทงาน/โครงการที่กำลังสำรวจ', 'warning');
         return;
-    }
-
-    // Add to categories list if new
-    if (!categories.includes(newCat)) {
-        categories.push(newCat);
-        localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
     }
 
     localStorage.setItem('survey_current_cat', newCat);
@@ -1203,6 +1239,78 @@ function toggleImportCategoryInput() {
     }
 }
 window.toggleImportCategoryInput = toggleImportCategoryInput;
+
+async function deleteImportCategory() {
+    const select = document.getElementById('import-category-select');
+    if (!select) return;
+    const catToDelete = select.value;
+
+    if (catToDelete === 'CUSTOM_NEW') {
+        Swal.fire('แจ้งเตือน', 'ไม่สามารถลบตัวเลือกประเภทงานใหม่ได้', 'warning');
+        return;
+    }
+    if (['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน'].includes(catToDelete)) {
+        Swal.fire('แจ้งเตือน', `ไม่สามารถลบประเภทงานเริ่มต้น "${catToDelete}" ได้`, 'warning');
+        return;
+    }
+
+    // Check if there are maps/jobs in dbJobs with this category
+    const inUse = dbJobs.some(j => j.category === catToDelete);
+    if (inUse) {
+        Swal.fire({
+            icon: 'error',
+            title: 'ไม่สามารถลบได้',
+            text: `ประเภทงาน "${catToDelete}" มีแปลงแผนที่นำเข้าใช้อยู่ในระบบ กรุณาลบข้อมูลแผนที่นำเข้าประเภทนี้ออกก่อนลบประเภทงาน`,
+            confirmButtonText: 'ตกลง',
+            confirmButtonColor: '#ef4444'
+        });
+        return;
+    }
+
+    // Confirm delete
+    const result = await Swal.fire({
+        title: 'ยืนยันการลบประเภทงาน?',
+        text: `คุณต้องการลบประเภทงาน "${catToDelete}" ออกจากรายการตัวเลือกตัวเลือกลิสต์ใช่หรือไม่?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'ลบข้อมูล',
+        cancelButtonText: 'ยกเลิก'
+    });
+
+    if (!result.isConfirmed) return;
+
+    // Delete from categories
+    categories = categories.filter(c => c !== catToDelete);
+    localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+
+    // Re-populate import mapping category list
+    const catSelect = document.getElementById('import-category-select');
+    if (catSelect) {
+        catSelect.innerHTML = '';
+        categories.forEach(cat => {
+            catSelect.innerHTML += `<option value="${cat}">${cat}</option>`;
+        });
+        catSelect.innerHTML += '<option value="CUSTOM_NEW">-- พิมพ์ระบุประเภทงานใหม่ --</option>';
+        catSelect.value = categories[0] || 'ทั่วไป';
+        toggleImportCategoryInput();
+    }
+
+    // Update profile UI because active category selection list could have changed
+    updateUserInfo();
+
+    Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'success',
+        title: `ลบประเภทงาน "${catToDelete}" สำเร็จ`,
+        timer: 1500,
+        showConfirmButton: false
+    });
+}
+window.deleteImportCategory = deleteImportCategory;
+
 
 function toggleProfileCategoryInput() {
     const select = document.getElementById('sel-profile-category');
@@ -2220,7 +2328,9 @@ async function deleteImportedMap(source, category) {
         const { error } = await supabaseClient
             .from('jobs')
             .delete()
-            .in('id', batchIds);
+            .eq('category', category)
+            .eq('properties->>import_source', source)
+            .eq('team_id', currentUser.team_id);
 
         if (error) throw error;
 

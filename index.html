@@ -985,12 +985,10 @@
                     <div class="p-4 border border-gray-200 rounded-2xl space-y-3 bg-gray-50/50">
                         <label class="text-xs font-bold text-gray-700 block">ประเภทงาน / โครงการที่กำลังสำรวจ</label>
                         <div class="space-y-2">
-                            <select id="sel-profile-category" onchange="toggleProfileCategoryInput()"
+                            <select id="sel-profile-category"
                                 class="w-full p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500">
                                 <!-- Dynamic options -->
                             </select>
-                            <input type="text" id="inp-profile-category" placeholder="พิมพ์ระบุประเภทงานใหม่ที่นี่..."
-                                class="w-full p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500 hidden">
                             <button onclick="saveProfileCategory()"
                                 class="w-full bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
                                 ตกลงเพื่อสลับงาน
@@ -1229,10 +1227,17 @@
 
                 <div class="border-t border-gray-150 pt-3 mt-3">
                     <label class="text-[10px] font-bold text-gray-600 block mb-1">7. ประเภทงาน / โครงการที่กำลังสำรวจ</label>
-                    <select id="import-category-select" onchange="toggleImportCategoryInput()"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500 mb-2">
-                        <!-- Options populated dynamically -->
-                    </select>
+                    <div class="flex gap-2 mb-2">
+                        <select id="import-category-select" onchange="toggleImportCategoryInput()"
+                            class="flex-1 p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                            <!-- Options populated dynamically -->
+                        </select>
+                        <button type="button" onclick="deleteImportCategory()"
+                            class="px-3 bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 rounded-xl border border-red-200 transition flex items-center justify-center"
+                            title="ลบประเภทงานนี้ออกจากตัวเลือก">
+                            <i class="fa-solid fa-trash-can text-xs"></i>
+                        </button>
+                    </div>
                     <input type="text" id="import-category-custom" placeholder="หรือพิมพ์ประเภทงานใหม่ที่นี่..."
                         class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500 hidden">
                 </div>
