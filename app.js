@@ -2605,6 +2605,9 @@ function generateReport(jobs) {
                 box-shadow: none;
                 border-radius: 0;
             }
+            .no-print {
+                display: none !important;
+            }
         }
         .header {
             text-align: center;
@@ -2676,9 +2679,56 @@ function generateReport(jobs) {
             border-top: 1px solid #f3f4f6;
             padding-top: 10px;
         }
+        /* Close Button Styles */
+        .close-btn-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+        }
+        .close-report-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background-color: #ffffff;
+            color: #1f2937;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: bold;
+            font-family: 'Sarabun', sans-serif;
+            cursor: pointer;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06), 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .close-report-btn:hover {
+            background-color: #f9fafb;
+            color: #ef4444;
+            border-color: #fca5a5;
+            transform: translateY(-2px);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05);
+        }
+        .close-report-btn:active {
+            transform: translateY(0);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+        .close-icon {
+            width: 18px;
+            height: 18px;
+            stroke-width: 2.5;
+        }
     </style>
 </head>
 <body>
+    <div class="no-print close-btn-container">
+        <button onclick="window.close()" class="close-report-btn">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor" class="close-icon">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            กลับหน้าแผนที่
+        </button>
+    </div>
 `;
 
     jobs.forEach((j, index) => {
