@@ -892,9 +892,20 @@
                             class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 group-focus-within:text-indigo-600 transition-colors duration-300">
                             <i class="fa-solid fa-lock text-xs"></i>
                         </span>
-                        <input type="password" id="auth-password" required placeholder="โ€ขโ€ขโ€ขโ€ขโ€ขโ€ขโ€ขโ€ข"
-                            class="w-full p-3 pl-9 text-sm border border-white/60 rounded-xl bg-white/50 backdrop-blur-md placeholder-gray-400 focus:bg-white/90 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all duration-300 shadow-sm">
+                        <input type="password" id="auth-password" required placeholder="••••••••"
+                            class="w-full p-3 pl-9 pr-10 text-sm border border-white/60 rounded-xl bg-white/50 backdrop-blur-md placeholder-gray-400 focus:bg-white/90 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all duration-300 shadow-sm">
+                        <button type="button" onclick="togglePasswordVisibility()" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-indigo-600 focus:outline-none">
+                            <i id="eye-icon" class="fa-solid fa-eye text-xs"></i>
+                        </button>
                     </div>
+                </div>
+
+                <!-- Remember Me Checkbox -->
+                <div class="flex items-center justify-between ml-1 text-xs text-indigo-950/80 font-medium">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="auth-remember" class="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 focus:ring-2">
+                        <span>จดจำรหัสผ่าน</span>
+                    </label>
                 </div>
 
                 <button type="submit" id="btn-auth-submit"
@@ -1210,6 +1221,16 @@
                         class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
                         <!-- Options populated dynamically -->
                     </select>
+                </div>
+
+                <div class="border-t border-gray-150 pt-3 mt-3">
+                    <label class="text-[10px] font-bold text-gray-600 block mb-1">7. ประเภทงาน / โครงการที่กำลังสำรวจ</label>
+                    <select id="import-category-select" onchange="toggleImportCategoryInput()"
+                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500 mb-2">
+                        <!-- Options populated dynamically -->
+                    </select>
+                    <input type="text" id="import-category-custom" placeholder="หรือพิมพ์ประเภทงานใหม่ที่นี่..."
+                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500 hidden">
                 </div>
             </div>
 

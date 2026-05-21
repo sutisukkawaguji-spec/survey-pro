@@ -55,6 +55,15 @@ function switchAuthTab(tab) {
             return;
         }
 
+        // Reset password visibility state when switching tabs
+        const passEl = document.getElementById('auth-password');
+        const eyeIcon = document.getElementById('eye-icon');
+        if (passEl) passEl.type = 'password';
+        if (eyeIcon) {
+            eyeIcon.classList.remove('fa-eye-slash');
+            eyeIcon.classList.add('fa-eye');
+        }
+
         if (tab === 'login') {
             tabLogin.classList.add('active');
             tabSignup.classList.remove('active');
@@ -78,6 +87,37 @@ function switchAuthTab(tab) {
 window.switchAuthTab = switchAuthTab;
 window._appSwitchAuthTab = switchAuthTab;
 
+function prefillRememberMe() {
+    const rememberMe = localStorage.getItem('survey_remember_me') === 'true';
+    if (rememberMe) {
+        const email = localStorage.getItem('survey_remember_email') || '';
+        const password = localStorage.getItem('survey_remember_password') || '';
+        const emailEl = document.getElementById('auth-email');
+        const passEl = document.getElementById('auth-password');
+        const remEl = document.getElementById('auth-remember');
+        if (emailEl) emailEl.value = email;
+        if (passEl) passEl.value = password;
+        if (remEl) remEl.checked = true;
+    }
+}
+
+function togglePasswordVisibility() {
+    const passEl = document.getElementById('auth-password');
+    const eyeIcon = document.getElementById('eye-icon');
+    if (passEl && eyeIcon) {
+        if (passEl.type === 'password') {
+            passEl.type = 'text';
+            eyeIcon.classList.remove('fa-eye');
+            eyeIcon.classList.add('fa-eye-slash');
+        } else {
+            passEl.type = 'password';
+            eyeIcon.classList.remove('fa-eye-slash');
+            eyeIcon.classList.add('fa-eye');
+        }
+    }
+}
+window.togglePasswordVisibility = togglePasswordVisibility;
+
 async function handleAuthSubmit(e) {
     e.preventDefault();
     if (!initSupabase()) {
@@ -95,6 +135,17 @@ async function handleAuthSubmit(e) {
             const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
             if (error) throw error;
             if (data.user) {
+                // Remember Me credentials persistence logic
+                const rememberEl = document.getElementById('auth-remember');
+                if (rememberEl && rememberEl.checked) {
+                    localStorage.setItem('survey_remember_me', 'true');
+                    localStorage.setItem('survey_remember_email', email);
+                    localStorage.setItem('survey_remember_password', password);
+                } else {
+                    localStorage.removeItem('survey_remember_me');
+                    localStorage.removeItem('survey_remember_email');
+                    localStorage.removeItem('survey_remember_password');
+                }
                 await loadUserProfileAndData(data.user);
                 Swal.fire({ toast: true, position: 'top', icon: 'success', title: 'ยินดีต้อนรับกลับเข้าสู่ระบบ', timer: 1500, showConfirmButton: false });
             }
@@ -346,6 +397,7 @@ async function startApp() {
     } catch (e) { }
 
     initApp();
+    prefillRememberMe();
     await checkAuthSession();
 
     // เริ่ม Polling ข้อมูลในทีมเงียบ ๆ ทุก 10 วินาที
@@ -1073,6 +1125,20 @@ function viewJsonData() {
 let tempImportFeatures = [];
 let onConfirmImportCallback = null;
 
+function toggleImportCategoryInput() {
+    const select = document.getElementById('import-category-select');
+    const input = document.getElementById('import-category-custom');
+    if (select && input) {
+        if (select.value === 'CUSTOM_NEW') {
+            input.classList.remove('hidden');
+            input.focus();
+        } else {
+            input.classList.add('hidden');
+        }
+    }
+}
+window.toggleImportCategoryInput = toggleImportCategoryInput;
+
 function showFieldMapping(feats, onConfirm) {
     closeSettingsModal();
     tempImportFeatures = feats;
@@ -1098,6 +1164,23 @@ function showFieldMapping(feats, onConfirm) {
             });
         }
     });
+
+    // Populate category select dropdown
+    const catSelect = document.getElementById('import-category-select');
+    if (catSelect) {
+        catSelect.innerHTML = '';
+        categories.forEach(cat => {
+            catSelect.innerHTML += `<option value="${cat}">${cat}</option>`;
+        });
+        catSelect.innerHTML += '<option value="CUSTOM_NEW">-- พิมพ์ระบุประเภทงานใหม่ --</option>';
+        catSelect.value = currentUser.category || categories[0] || 'ทั่วไป';
+    }
+
+    const customInput = document.getElementById('import-category-custom');
+    if (customInput) {
+        customInput.value = '';
+        customInput.classList.add('hidden');
+    }
 
     // Set default selections
     const idSel = document.getElementById('map-field-id');
@@ -1164,6 +1247,24 @@ if (document.getElementById('btn-confirm-import')) {
         const mappedNote = document.getElementById('map-field-note').value;
         const mappedStatus = document.getElementById('map-field-status').value;
 
+        // Retrieve and validate selected category
+        const chosenCategorySelect = document.getElementById('import-category-select').value;
+        const chosenCategoryCustom = document.getElementById('import-category-custom').value.trim();
+        let targetCategory = chosenCategorySelect;
+        if (chosenCategorySelect === 'CUSTOM_NEW') {
+            if (!chosenCategoryCustom) {
+                Swal.fire('ข้อมูลไม่ครบ', 'กรุณาระบุประเภทงานใหม่', 'warning');
+                return;
+            }
+            targetCategory = chosenCategoryCustom;
+        }
+
+        // Add custom category to system list if it is new
+        if (targetCategory && !categories.includes(targetCategory)) {
+            categories.push(targetCategory);
+            localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+        }
+
         document.getElementById('import-mapping-modal').classList.add('hidden');
 
         if (onConfirmImportCallback) {
@@ -1174,7 +1275,8 @@ if (document.getElementById('btn-confirm-import')) {
                 tambonKey: mappedTambon,
                 areaKey: mappedArea,
                 noteKey: mappedNote,
-                statusKey: mappedStatus
+                statusKey: mappedStatus,
+                targetCategory: targetCategory
             });
         }
     };
@@ -1259,7 +1361,7 @@ async function importData(input) {
                         lng,
                         geometry: geom,
                         status: finalStatus,
-                        category: currentUser.category,
+                        category: mapping.targetCategory || currentUser.category || 'ทั่วไป',
                         properties: {
                             ...p,
                             name: nameVal,
@@ -1276,6 +1378,22 @@ async function importData(input) {
                     await saveJobToSupabase(job);
                     count++;
                 }
+
+                // Update active category
+                const targetCategory = mapping.targetCategory || currentUser.category || 'ทั่วไป';
+                currentUser.category = targetCategory;
+                localStorage.setItem('survey_current_cat', targetCategory);
+
+                // Update category lists in memory
+                if (targetCategory && !categories.includes(targetCategory)) {
+                    categories.push(targetCategory);
+                    localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+                }
+
+                // Prefill the profile category input
+                const inpProfileCat = document.getElementById('inp-profile-category');
+                if (inpProfileCat) inpProfileCat.value = targetCategory;
+
                 Swal.fire('สำเร็จ', `นำเข้าแปลงที่ดินสำเร็จ ${count} รายการ`, 'success');
                 await syncJobsFromDB();
             });
@@ -1843,7 +1961,7 @@ async function importFromCloudLink() {
                     lng,
                     geometry: geom,
                     status: finalStatus,
-                    category: currentUser.category,
+                    category: mapping.targetCategory || currentUser.category || 'ทั่วไป',
                     properties: {
                         ...p,
                         name: nameVal,
@@ -1860,6 +1978,21 @@ async function importFromCloudLink() {
                 await saveJobToSupabase(job);
                 imported++;
             }
+
+            // Update active category
+            const targetCategory = mapping.targetCategory || currentUser.category || 'ทั่วไป';
+            currentUser.category = targetCategory;
+            localStorage.setItem('survey_current_cat', targetCategory);
+
+            // Update category lists in memory
+            if (targetCategory && !categories.includes(targetCategory)) {
+                categories.push(targetCategory);
+                localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+            }
+
+            // Prefill the profile category input
+            const inpProfileCat = document.getElementById('inp-profile-category');
+            if (inpProfileCat) inpProfileCat.value = targetCategory;
 
             Swal.fire('นำเข้าสำเร็จ', `เชื่อมโยงและนำเข้าข้อมูลสำเร็จ ${imported} แปลงแผนที่`, 'success');
             await syncJobsFromDB();
@@ -1894,26 +2027,29 @@ function renderImportedMapsList() {
         return;
     }
 
-    // Group jobs in dbJobs by import_source (only for current category)
-    const catJobs = dbJobs.filter(j => j.category === currentUser.category && j.properties && j.properties.import_source);
+    // Group jobs in dbJobs by both category and import_source
+    const importJobs = dbJobs.filter(j => j.properties && j.properties.import_source);
 
     // Grouping
     const groups = {};
-    catJobs.forEach(job => {
+    importJobs.forEach(job => {
+        const cat = job.category || 'ทั่วไป';
         const src = job.properties.import_source;
-        if (!groups[src]) {
-            groups[src] = {
+        const key = `${cat}|||${src}`;
+        if (!groups[key]) {
+            groups[key] = {
+                category: cat,
                 source: src,
                 count: 0
             };
         }
-        groups[src].count++;
+        groups[key].count++;
     });
 
     const sources = Object.values(groups);
 
     if (sources.length === 0) {
-        listDiv.innerHTML = '<div class="text-[11px] text-gray-400 text-center py-3">ไม่มีข้อมูลการนำเข้าในประเภทงานนี้</div>';
+        listDiv.innerHTML = '<div class="text-[11px] text-gray-400 text-center py-3">ไม่มีข้อมูลการนำเข้า</div>';
         return;
     }
 
@@ -1930,14 +2066,20 @@ function renderImportedMapsList() {
         }
         
         const escapedSource = group.source.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const escapedCategory = group.category.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
         html += `
             <div class="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl border border-gray-100 hover:border-gray-200 transition">
                 <div class="min-w-0 flex-1">
                     <p class="text-xs font-bold text-gray-700 truncate" title="${group.source}">${displayName}</p>
-                    <p class="text-[10px] text-gray-500">${group.count} แปลงแผนที่</p>
+                    <div class="flex flex-wrap items-center gap-1.5 mt-1">
+                        <span class="inline-flex items-center text-[9px] font-semibold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">
+                            ประเภทงาน: ${group.category}
+                        </span>
+                        <span class="text-[10px] text-gray-500">${group.count} แปลงแผนที่</span>
+                    </div>
                 </div>
-                <button onclick="deleteImportedMap('${escapedSource}')"
+                <button onclick="deleteImportedMap('${escapedSource}', '${escapedCategory}')"
                     class="text-xs text-red-500 hover:text-red-700 p-1.5 rounded-lg hover:bg-red-50 transition ml-2 flex-shrink-0"
                     title="ลบข้อมูลการนำเข้านี้">
                     <i class="fa-solid fa-trash-can"></i>
@@ -1949,15 +2091,15 @@ function renderImportedMapsList() {
     listDiv.innerHTML = html;
 }
 
-async function deleteImportedMap(source) {
+async function deleteImportedMap(source, category) {
     if (!supabaseClient || !currentUser) return;
 
-    const targetJobs = dbJobs.filter(j => j.category === currentUser.category && j.properties && j.properties.import_source === source);
+    const targetJobs = dbJobs.filter(j => j.category === category && j.properties && j.properties.import_source === source);
     if (targetJobs.length === 0) return;
 
     const result = await Swal.fire({
         title: 'ยืนยันการลบแผนที่นำเข้า?',
-        text: `แปลงที่ดินทั้งหมด ${targetJobs.length} รายการ จากแหล่งข้อมูล "${source}" จะถูกลบถาวรจากฐานข้อมูล รวมทั้งรูปภาพบันทึกต่างๆ (ถ้ามี)`,
+        text: `แปลงที่ดินทั้งหมด ${targetJobs.length} รายการ จากแหล่งข้อมูล "${source}" (ประเภทงาน: ${category}) จะถูกลบถาวรจากฐานข้อมูล รวมทั้งรูปภาพบันทึกต่างๆ (ถ้ามี)`,
         icon: 'warning',
         showCancelButton: true,
         confirmButtonColor: '#d33',
