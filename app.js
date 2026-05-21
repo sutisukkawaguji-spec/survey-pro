@@ -215,7 +215,7 @@ async function syncJobsFromDB() {
 }
 
 async function syncJobsSilently() {
-    if (!supabaseClient || !currentUser || isNavigating) return;
+    if (!supabaseClient || !currentUser || isNavigating || isMapClickBlocked) return;
     try {
         const { data, error } = await supabaseClient
             .from('jobs')
@@ -308,6 +308,8 @@ let viewMode = 'original', isNavigating = false, isFollowing = false;
 let speechSynth = window.speechSynthesis;
 let navInterval = null;
 let markerJustClicked = false;
+let isMapClickBlocked = false;
+let justDeletedJobId = null;
 
 // Override Swal.fire to prevent overlapping/frozen alerts, especially on iOS Safari
 if (window.Swal) {
@@ -762,6 +764,8 @@ async function stopNav() {
 }
 
 function openSheet(job) {
+    if (isMapClickBlocked) return;
+    if (justDeletedJobId && job.id === justDeletedJobId) return;
     selectedImagesToDelete = [];
     updateDeleteSelectedButton();
     selectedJobId = job.id;
@@ -838,8 +842,11 @@ function openSheet(job) {
     }
 
     document.getElementById('fab-container').classList.add('sheet-open');
-    document.getElementById('sheet').classList.remove('minimized');
-    document.getElementById('sheet').classList.add('active');
+    const sheet = document.getElementById('sheet');
+    sheet.classList.remove('minimized');
+    sheet.classList.add('active');
+    // ✅ รีเซ็ต transform: ใช้ CSS จัดการ (transform: translateY(0) จาก .active)
+    sheet.style.transform = '';
 
     if (!isNavigating) map.flyTo([job.lat, job.lng], 16);
 }
@@ -1296,6 +1303,13 @@ async function deleteJob() {
 
         if (result.isConfirmed) {
             const deleteFromCloud = result.value.deleteFromCloud;
+
+            // ✅ ป้องกัน Ghost Box: ปิด Sheet, ล้าง ID และล็อกคลิก
+            justDeletedJobId = job.id;
+            selectedJobId = null;
+            isMapClickBlocked = true;
+            closeSheet();
+
             showLoading(true, 'กำลังลบผลการสำรวจ...');
             try {
                 if (deleteFromCloud && hasImages) {
@@ -1322,13 +1336,21 @@ async function deleteJob() {
                 // 3. Save to Supabase
                 await saveJobToSupabase(job);
 
+                // 4. Render map (sheet already closed)
                 renderMap();
-                closeSheet();
-                Swal.fire({ toast: true, icon: 'success', title: 'ลบผลการสำรวจและคืนค่าสถานะแล้ว', timer: 1500, showConfirmButton: false });
+                showLoading(false);
+
+                // 5. Show success toast (รอให้ปิดสนิทแล้วค่อยปล่อย justDeletedJobId)
+                await Swal.fire({ toast: true, icon: 'success', title: 'ลบผลการสำรวจและคืนค่าสถานะแล้ว', timer: 1500, showConfirmButton: false });
             } catch (e) {
+                showLoading(false);
                 Swal.fire('ทำรายการไม่สำเร็จ', e.message, 'error');
             } finally {
-                showLoading(false);
+                // ✅ ขยายเวลาให้ Swal Toast ปิดสนิทก่อนปล่อย ID
+                setTimeout(() => {
+                    justDeletedJobId = null;
+                    isMapClickBlocked = false;
+                }, 2000);
             }
         }
     } else {
@@ -1345,6 +1367,12 @@ async function deleteJob() {
         });
 
         if (confirm.isConfirmed) {
+            // ✅ ป้องกัน Ghost Box: ปิด Sheet, ล้าง ID และล็อกคลิก
+            justDeletedJobId = job.id;
+            selectedJobId = null;
+            isMapClickBlocked = true;
+            closeSheet();
+
             showLoading(true, 'กำลังลบข้อมูล...');
             try {
                 const { error } = await supabaseClient
@@ -1356,12 +1384,16 @@ async function deleteJob() {
 
                 dbJobs.splice(jobIndex, 1);
                 renderMap();
-                closeSheet();
-                Swal.fire('ลบสำเร็จ', 'รายการนี้ถูกลบแล้ว', 'success');
+                showLoading(false);
+                await Swal.fire('ลบสำเร็จ', 'รายการนี้ถูกลบแล้ว', 'success');
             } catch (e) {
+                showLoading(false);
                 Swal.fire('ล้มเหลว', e.message, 'error');
             } finally {
-                showLoading(false);
+                setTimeout(() => {
+                    justDeletedJobId = null;
+                    isMapClickBlocked = false;
+                }, 2000);
             }
         }
     }
@@ -2520,16 +2552,16 @@ async function deleteJobImage(idx) {
                     // ใช้ mode: 'no-cors' เพื่อป้องกัน CORS redirection error จาก Google Apps Script
                     await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
                 }
-                
+
                 // ลบรูปภาพออกจากรายการและบันทึกข้อมูล
                 job.properties.images.splice(idx, 1);
                 await saveJobToSupabase(job);
                 renderImageGallery(job.properties.images, true);
-                
+
                 // รีเซ็ตการเลือกถ้ามีรูปที่เลือกถูกลบออกไปเดี่ยวๆ
                 selectedImagesToDelete = selectedImagesToDelete.filter(x => x !== (typeof img === 'string' ? img : img.url));
                 updateDeleteSelectedButton();
-                
+
                 Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปภาพสำเร็จ', timer: 1500, showConfirmButton: false });
             }
         } catch (e) {
