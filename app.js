@@ -255,6 +255,18 @@ async function syncJobsFromDB() {
         if (error) throw error;
 
         dbJobs = data || [];
+
+        // Scan data for unique categories and merge/register them
+        const dbCategories = new Set(categories);
+        dbJobs.forEach(j => {
+            if (j.category) dbCategories.add(j.category);
+        });
+        categories = Array.from(dbCategories);
+        localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+        
+        updateUserInfo();
+        renderImportedMapsList();
+
         updateAmphoeDropdown();
         renderMap(true);
     } catch (e) {
@@ -292,6 +304,20 @@ async function syncJobsSilently() {
             }
 
             dbJobs = data;
+
+            // Scan data for unique categories and merge/register them
+            const dbCategories = new Set(categories);
+            dbJobs.forEach(j => {
+                if (j.category) dbCategories.add(j.category);
+            });
+            const oldLength = categories.length;
+            categories = Array.from(dbCategories);
+            if (categories.length !== oldLength) {
+                localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
+                updateUserInfo();
+            }
+            renderImportedMapsList();
+
             renderMap(false);
             if (selectedJobId) {
                 const currentOpenJob = dbJobs.find(j => j.id === selectedJobId);
@@ -519,6 +545,12 @@ function resetGps() {
         }).addTo(map);
         
         map.setView(latlng, 17);
+        isFollowing = true;
+        const btnGps = document.getElementById('btn-gps');
+        if (btnGps) {
+            btnGps.classList.add('bg-blue-50', 'text-blue-600');
+            btnGps.classList.remove('text-gray-400');
+        }
         showLoading(false);
         Swal.fire({
             icon: 'success',
@@ -553,22 +585,55 @@ function updateUserInfo() {
     document.getElementById('profile-email').innerText = currentUser.email || '-';
     document.getElementById('profile-user-code').innerText = currentUser.user_code || '------';
     
+    // Populate profile category select dropdown
+    const selProfileCat = document.getElementById('sel-profile-category');
+    if (selProfileCat) {
+        selProfileCat.innerHTML = '';
+        categories.forEach(cat => {
+            selProfileCat.innerHTML += `<option value="${cat}">${cat}</option>`;
+        });
+        selProfileCat.innerHTML += '<option value="CUSTOM_NEW">-- พิมพ์ระบุประเภทงานใหม่ --</option>';
+        
+        // If current user category is not in categories list, prepend it
+        const currentCat = currentUser.category || 'ทั่วไป';
+        if (!categories.includes(currentCat)) {
+            const option = document.createElement('option');
+            option.value = currentCat;
+            option.text = currentCat;
+            selProfileCat.insertBefore(option, selProfileCat.lastChild);
+        }
+        selProfileCat.value = currentCat;
+    }
+    
     const catInput = document.getElementById('inp-profile-category');
     if (catInput) {
-        catInput.value = currentUser.category || 'ทั่วไป';
+        catInput.value = '';
+        catInput.classList.add('hidden');
     }
     
     updateGpsStatus();
 }
 
 function saveProfileCategory() {
+    const selProfileCat = document.getElementById('sel-profile-category');
     const catInput = document.getElementById('inp-profile-category');
-    if (!catInput) return;
+    if (!selProfileCat) return;
 
-    const newCat = catInput.value.trim();
+    let newCat = selProfileCat.value;
+    if (newCat === 'CUSTOM_NEW') {
+        if (!catInput) return;
+        newCat = catInput.value.trim();
+    }
+
     if (!newCat) {
-        Swal.fire('คำเตือน', 'กรุณาระบุประเภทงาน/โครงการที่กำลังสำรวจ', 'warning');
+        Swal.fire('คำเตือน', 'กรุณาระบุหรือเลือกประเภทงาน/โครงการที่กำลังสำรวจ', 'warning');
         return;
+    }
+
+    // Add to categories list if new
+    if (!categories.includes(newCat)) {
+        categories.push(newCat);
+        localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
     }
 
     localStorage.setItem('survey_current_cat', newCat);
@@ -1139,6 +1204,20 @@ function toggleImportCategoryInput() {
 }
 window.toggleImportCategoryInput = toggleImportCategoryInput;
 
+function toggleProfileCategoryInput() {
+    const select = document.getElementById('sel-profile-category');
+    const input = document.getElementById('inp-profile-category');
+    if (select && input) {
+        if (select.value === 'CUSTOM_NEW') {
+            input.classList.remove('hidden');
+            input.focus();
+        } else {
+            input.classList.add('hidden');
+        }
+    }
+}
+window.toggleProfileCategoryInput = toggleProfileCategoryInput;
+
 function showFieldMapping(feats, onConfirm) {
     closeSettingsModal();
     tempImportFeatures = feats;
@@ -1283,8 +1362,8 @@ if (document.getElementById('btn-confirm-import')) {
 }
 
 async function importData(input) {
-    const f = input.files[0];
-    if (!f) return;
+    const file = input.files[0];
+    if (!file) return;
     showLoading(true, 'กำลังอ่านไฟล์และนำเข้า...');
     const r = new FileReader();
     r.onload = async (e) => {
@@ -1329,7 +1408,9 @@ async function importData(input) {
                     const statusVal = mapping.statusKey && p[mapping.statusKey] !== undefined && p[mapping.statusKey] !== null ? p[mapping.statusKey].toString().trim() : '';
 
                     // Check duplicate first to keep status/notes/photos if already exists
-                    const finalId = idValue || 'IMP-' + Math.random().toString(36).substr(2, 9);
+                    const cleanSource = (file.name || 'อัปโหลดไฟล์').replace(/[^a-zA-Z0-9_\u0e00-\u0e7f]/g, '_');
+                    const targetCategory = mapping.targetCategory || currentUser.category || 'ทั่วไป';
+                    const finalId = targetCategory + '_' + cleanSource + '_' + (idValue || 'IMP_' + Math.random().toString(36).substr(2, 9));
                     const existing = dbJobs.find(x => x.id === finalId);
 
                     let finalStatus = 'waiting';
@@ -1365,7 +1446,7 @@ async function importData(input) {
                         properties: {
                             ...p,
                             name: nameVal,
-                            import_source: f.name || 'อัปโหลดไฟล์',
+                            import_source: file.name || 'อัปโหลดไฟล์',
                             note: finalNote,
                             images: existing ? existing.properties.images : [],
                             search_field: searchVal,
@@ -1403,7 +1484,7 @@ async function importData(input) {
             showLoading(false);
         }
     };
-    r.readAsText(f);
+    r.readAsText(file);
     input.value = '';
 }
 
@@ -1897,6 +1978,14 @@ async function importFromCloudLink() {
             showLoading(true, `กำลังเขียน ${feats.length} รายการลงคลาวด์ Supabase...`);
             let imported = 0;
 
+            let cleanSource = 'dropbox';
+            try {
+                const urlObj = new URL(url);
+                const pathParts = urlObj.pathname.split('/');
+                cleanSource = pathParts[pathParts.length - 1] || 'dropbox';
+            } catch (e) {}
+            cleanSource = cleanSource.replace(/[^a-zA-Z0-9_\u0e00-\u0e7f]/g, '_') || 'dropbox';
+
             for (let f of feats) {
                 const p = f.properties || f;
                 let geom = f.geometry;
@@ -1929,7 +2018,8 @@ async function importFromCloudLink() {
                 const statusVal = mapping.statusKey && p[mapping.statusKey] !== undefined && p[mapping.statusKey] !== null ? p[mapping.statusKey].toString().trim() : '';
 
                 // Check duplicate first
-                const finalId = idValue || 'GD-' + Math.random().toString(36).substr(2, 9);
+                const targetCategory = mapping.targetCategory || currentUser.category || 'ทั่วไป';
+                const finalId = targetCategory + '_' + cleanSource + '_' + (idValue || 'GD_' + Math.random().toString(36).substr(2, 9));
                 const existing = dbJobs.find(x => x.id === finalId);
 
                 let finalStatus = 'waiting';
@@ -1961,7 +2051,7 @@ async function importFromCloudLink() {
                     lng,
                     geometry: geom,
                     status: finalStatus,
-                    category: mapping.targetCategory || currentUser.category || 'ทั่วไป',
+                    category: targetCategory,
                     properties: {
                         ...p,
                         name: nameVal,

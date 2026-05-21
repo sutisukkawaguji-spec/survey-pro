@@ -892,7 +892,7 @@
                             class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-400 group-focus-within:text-indigo-600 transition-colors duration-300">
                             <i class="fa-solid fa-lock text-xs"></i>
                         </span>
-                        <input type="password" id="auth-password" required placeholder="••••••••"
+                        <input type="password" id="auth-password" required placeholder="********"
                             class="w-full p-3 pl-9 pr-10 text-sm border border-white/60 rounded-xl bg-white/50 backdrop-blur-md placeholder-gray-400 focus:bg-white/90 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 outline-none transition-all duration-300 shadow-sm">
                         <button type="button" onclick="togglePasswordVisibility()" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-400 hover:text-indigo-600 focus:outline-none">
                             <i id="eye-icon" class="fa-solid fa-eye text-xs"></i>
@@ -984,12 +984,16 @@
                     <!-- ประเภทงาน / โครงการที่กำลังสำรวจ -->
                     <div class="p-4 border border-gray-200 rounded-2xl space-y-3 bg-gray-50/50">
                         <label class="text-xs font-bold text-gray-700 block">ประเภทงาน / โครงการที่กำลังสำรวจ</label>
-                        <div class="flex gap-2">
-                            <input type="text" id="inp-profile-category" placeholder="ระบุประเภทงาน เช่น ทั่วไป, ตรวจสอบ..."
-                                class="flex-1 p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500">
+                        <div class="space-y-2">
+                            <select id="sel-profile-category" onchange="toggleProfileCategoryInput()"
+                                class="w-full p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500">
+                                <!-- Dynamic options -->
+                            </select>
+                            <input type="text" id="inp-profile-category" placeholder="พิมพ์ระบุประเภทงานใหม่ที่นี่..."
+                                class="w-full p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500 hidden">
                             <button onclick="saveProfileCategory()"
-                                class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
-                                บันทึก
+                                class="w-full bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
+                                ตกลงเพื่อสลับงาน
                             </button>
                         </div>
                         <p class="text-[9px] text-gray-500 leading-normal">ระบบจะแสดงผลและนำเข้าหมุดเฉพาะในประเภทงานนี้เท่านั้น</p>
