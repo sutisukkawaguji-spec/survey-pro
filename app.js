@@ -446,17 +446,26 @@ function updateGpsStatus() {
 
 function resetGps() {
     showLoading(true, 'กำลังเปิดขอสิทธิ์ GPS อีกครั้ง...');
+    
+    if (gpsWatchId) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+    }
+    
+    if (userMarker) {
+        map.removeLayer(userMarker);
+        userMarker = null;
+    }
+
     navigator.geolocation.getCurrentPosition(p => {
         isGpsActive = true;
         updateGpsStatus();
         const latlng = [p.coords.latitude, p.coords.longitude];
-        if (!userMarker) {
-            userMarker = L.marker(latlng, {
-                icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
-            }).addTo(map);
-        } else {
-            userMarker.setLatLng(latlng);
-        }
+        
+        userMarker = L.marker(latlng, {
+            icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
+        }).addTo(map);
+        
         map.setView(latlng, 17);
         showLoading(false);
         Swal.fire({
@@ -482,6 +491,7 @@ function resetGps() {
             confirmButtonText: 'รับทราบ',
             confirmButtonColor: '#3b82f6'
         });
+        startGpsTracking();
     }, { enableHighAccuracy: true, timeout: 10000 });
 }
 
@@ -490,8 +500,44 @@ function updateUserInfo() {
     document.getElementById('profile-display-name').innerText = currentUser.name;
     document.getElementById('profile-email').innerText = currentUser.email || '-';
     document.getElementById('profile-user-code').innerText = currentUser.user_code || '------';
+    
+    const catInput = document.getElementById('inp-profile-category');
+    if (catInput) {
+        catInput.value = currentUser.category || 'ทั่วไป';
+    }
+    
     updateGpsStatus();
 }
+
+function saveProfileCategory() {
+    const catInput = document.getElementById('inp-profile-category');
+    if (!catInput) return;
+
+    const newCat = catInput.value.trim();
+    if (!newCat) {
+        Swal.fire('คำเตือน', 'กรุณาระบุประเภทงาน/โครงการที่กำลังสำรวจ', 'warning');
+        return;
+    }
+
+    localStorage.setItem('survey_current_cat', newCat);
+    currentUser.category = newCat;
+
+    updateUserInfo();
+    updateCounter();
+    
+    // Sync from database and re-draw markers with the new category
+    syncJobsFromDB();
+
+    Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'success',
+        title: `สลับประเภทงานเป็น: ${newCat}`,
+        timer: 1500,
+        showConfirmButton: false
+    });
+}
+
 
 function updateCounter() {
     const catJobs = dbJobs.filter(j => j.category === currentUser.category);
@@ -1042,7 +1088,7 @@ function showFieldMapping(feats, onConfirm) {
     });
     const keysArray = Array.from(allKeys).sort();
 
-    const fields = ['id', 'search', 'amphoe', 'tambon', 'area'];
+    const fields = ['id', 'search', 'amphoe', 'tambon', 'area', 'note', 'status'];
     fields.forEach(f => {
         const select = document.getElementById(`map-field-${f}`);
         if (select) {
@@ -1059,6 +1105,8 @@ function showFieldMapping(feats, onConfirm) {
     const amphoeSel = document.getElementById('map-field-amphoe');
     const tambonSel = document.getElementById('map-field-tambon');
     const areaSel = document.getElementById('map-field-area');
+    const noteSel = document.getElementById('map-field-note');
+    const statusSel = document.getElementById('map-field-status');
 
     // Reset values first
     if (idSel) idSel.value = "";
@@ -1066,6 +1114,8 @@ function showFieldMapping(feats, onConfirm) {
     if (amphoeSel) amphoeSel.value = "";
     if (tambonSel) tambonSel.value = "";
     if (areaSel) areaSel.value = "";
+    if (noteSel) noteSel.value = "";
+    if (statusSel) statusSel.value = "";
 
     // Auto-detect best match
     keysArray.forEach(k => {
@@ -1084,6 +1134,12 @@ function showFieldMapping(feats, onConfirm) {
         }
         if (areaSel && !areaSel.value && (lower.includes('area') || lower.includes('size') || lower.includes('rai') || lower.includes('เนื้อที่'))) {
             areaSel.value = k;
+        }
+        if (noteSel && !noteSel.value && (lower.includes('note') || lower.includes('remark') || lower.includes('ข้อความ') || lower.includes('รายละเอียด') || lower.includes('comment'))) {
+            noteSel.value = k;
+        }
+        if (statusSel && !statusSel.value && (lower.includes('status') || lower.includes('state') || lower.includes('สถานะ'))) {
+            statusSel.value = k;
         }
     });
 
@@ -1105,6 +1161,8 @@ if (document.getElementById('btn-confirm-import')) {
         const mappedAmphoe = document.getElementById('map-field-amphoe').value;
         const mappedTambon = document.getElementById('map-field-tambon').value;
         const mappedArea = document.getElementById('map-field-area').value;
+        const mappedNote = document.getElementById('map-field-note').value;
+        const mappedStatus = document.getElementById('map-field-status').value;
 
         document.getElementById('import-mapping-modal').classList.add('hidden');
 
@@ -1114,7 +1172,9 @@ if (document.getElementById('btn-confirm-import')) {
                 searchKey: mappedSearch,
                 amphoeKey: mappedAmphoe,
                 tambonKey: mappedTambon,
-                areaKey: mappedArea
+                areaKey: mappedArea,
+                noteKey: mappedNote,
+                statusKey: mappedStatus
             });
         }
     };
@@ -1163,27 +1223,54 @@ async function importData(input) {
                     const amphoeVal = mapping.amphoeKey && p[mapping.amphoeKey] !== undefined && p[mapping.amphoeKey] !== null ? p[mapping.amphoeKey].toString().trim() : '';
                     const tambonVal = mapping.tambonKey && p[mapping.tambonKey] !== undefined && p[mapping.tambonKey] !== null ? p[mapping.tambonKey].toString().trim() : '';
                     const areaVal = mapping.areaKey && p[mapping.areaKey] !== undefined && p[mapping.areaKey] !== null ? p[mapping.areaKey].toString().trim() : '';
+                    const noteVal = mapping.noteKey && p[mapping.noteKey] !== undefined && p[mapping.noteKey] !== null ? p[mapping.noteKey].toString().trim() : '';
+                    const statusVal = mapping.statusKey && p[mapping.statusKey] !== undefined && p[mapping.statusKey] !== null ? p[mapping.statusKey].toString().trim() : '';
 
                     // Check duplicate first to keep status/notes/photos if already exists
                     const finalId = idValue || 'IMP-' + Math.random().toString(36).substr(2, 9);
                     const existing = dbJobs.find(x => x.id === finalId);
+
+                    let finalStatus = 'waiting';
+                    if (statusVal) {
+                        const s = statusVal.toLowerCase();
+                        if (s === 'done' || s === 'เสร็จสิ้น' || s === 'เสร็จ' || s === 'สำเร็จ' || s === '1' || s === 'yes' || s === 'true') {
+                            finalStatus = 'done';
+                        } else if (s === 'checking' || s === 'ตรวจสอบ') {
+                            finalStatus = 'checking';
+                        } else {
+                            finalStatus = 'waiting';
+                        }
+                    } else if (existing) {
+                        finalStatus = existing.status;
+                    } else if (noteVal) {
+                        finalStatus = 'done';
+                    }
+
+                    const finalNote = noteVal || (existing ? existing.properties.note : (p.REMARK || p.note || ''));
+
+                    let finalDate = existing && existing.properties.date ? existing.properties.date : '';
+                    if (finalStatus === 'done' && !finalDate) {
+                        finalDate = new Date().toISOString().split('T')[0];
+                    }
+
                     const job = {
                         id: finalId,
                         lat,
                         lng,
                         geometry: geom,
-                        status: existing ? existing.status : 'waiting',
+                        status: finalStatus,
                         category: currentUser.category,
                         properties: {
                             ...p,
                             name: nameVal,
                             import_source: f.name || 'อัปโหลดไฟล์',
-                            note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
+                            note: finalNote,
                             images: existing ? existing.properties.images : [],
                             search_field: searchVal,
                             amphoe: amphoeVal,
                             tambon: tambonVal,
-                            area: areaVal
+                            area: areaVal,
+                            date: finalDate
                         }
                     };
                     await saveJobToSupabase(job);
@@ -1378,7 +1465,7 @@ async function deleteJob() {
                 const { error } = await supabaseClient
                     .from('jobs')
                     .delete()
-                    .eq('id', selectedJobId);
+                    .eq('id', job.id);
 
                 if (error) throw error;
 
@@ -1482,6 +1569,8 @@ function switchSettingsTab(tab) {
 
     if (tab === 'profile') {
         loadTeamMembers();
+    } else if (tab === 'geojson') {
+        renderImportedMapsList();
     }
 }
 
@@ -1718,27 +1807,54 @@ async function importFromCloudLink() {
                 const amphoeVal = mapping.amphoeKey && p[mapping.amphoeKey] !== undefined && p[mapping.amphoeKey] !== null ? p[mapping.amphoeKey].toString().trim() : '';
                 const tambonVal = mapping.tambonKey && p[mapping.tambonKey] !== undefined && p[mapping.tambonKey] !== null ? p[mapping.tambonKey].toString().trim() : '';
                 const areaVal = mapping.areaKey && p[mapping.areaKey] !== undefined && p[mapping.areaKey] !== null ? p[mapping.areaKey].toString().trim() : '';
+                const noteVal = mapping.noteKey && p[mapping.noteKey] !== undefined && p[mapping.noteKey] !== null ? p[mapping.noteKey].toString().trim() : '';
+                const statusVal = mapping.statusKey && p[mapping.statusKey] !== undefined && p[mapping.statusKey] !== null ? p[mapping.statusKey].toString().trim() : '';
 
                 // Check duplicate first
                 const finalId = idValue || 'GD-' + Math.random().toString(36).substr(2, 9);
                 const existing = dbJobs.find(x => x.id === finalId);
+
+                let finalStatus = 'waiting';
+                if (statusVal) {
+                    const s = statusVal.toLowerCase();
+                    if (s === 'done' || s === 'เสร็จสิ้น' || s === 'เสร็จ' || s === 'สำเร็จ' || s === '1' || s === 'yes' || s === 'true') {
+                        finalStatus = 'done';
+                    } else if (s === 'checking' || s === 'ตรวจสอบ') {
+                        finalStatus = 'checking';
+                    } else {
+                        finalStatus = 'waiting';
+                    }
+                } else if (existing) {
+                    finalStatus = existing.status;
+                } else if (noteVal) {
+                    finalStatus = 'done';
+                }
+
+                const finalNote = noteVal || (existing ? existing.properties.note : (p.REMARK || p.note || ''));
+
+                let finalDate = existing && existing.properties.date ? existing.properties.date : '';
+                if (finalStatus === 'done' && !finalDate) {
+                    finalDate = new Date().toISOString().split('T')[0];
+                }
+
                 const job = {
                     id: finalId,
                     lat,
                     lng,
                     geometry: geom,
-                    status: existing ? existing.status : 'waiting',
+                    status: finalStatus,
                     category: currentUser.category,
                     properties: {
                         ...p,
                         name: nameVal,
                         import_source: url,
-                        note: existing ? existing.properties.note : (p.REMARK || p.note || ''),
+                        note: finalNote,
                         images: existing ? existing.properties.images : [],
                         search_field: searchVal,
                         amphoe: amphoeVal,
                         tambon: tambonVal,
-                        area: areaVal
+                        area: areaVal,
+                        date: finalDate
                     }
                 };
                 await saveJobToSupabase(job);
@@ -1769,7 +1885,135 @@ async function importFromCloudLink() {
     }
 }
 
+function renderImportedMapsList() {
+    const listDiv = document.getElementById('imported-maps-list');
+    if (!listDiv) return;
 
+    if (!currentUser) {
+        listDiv.innerHTML = '<div class="text-[11px] text-gray-400 text-center py-3">กรุณาเข้าสู่ระบบ</div>';
+        return;
+    }
+
+    // Group jobs in dbJobs by import_source (only for current category)
+    const catJobs = dbJobs.filter(j => j.category === currentUser.category && j.properties && j.properties.import_source);
+
+    // Grouping
+    const groups = {};
+    catJobs.forEach(job => {
+        const src = job.properties.import_source;
+        if (!groups[src]) {
+            groups[src] = {
+                source: src,
+                count: 0
+            };
+        }
+        groups[src].count++;
+    });
+
+    const sources = Object.values(groups);
+
+    if (sources.length === 0) {
+        listDiv.innerHTML = '<div class="text-[11px] text-gray-400 text-center py-3">ไม่มีข้อมูลการนำเข้าในประเภทงานนี้</div>';
+        return;
+    }
+
+    let html = '';
+    sources.forEach(group => {
+        let displayName = group.source;
+        if (displayName.startsWith('http://') || displayName.startsWith('https://')) {
+            try {
+                const urlObj = new URL(displayName);
+                displayName = 'Dropbox: ' + urlObj.pathname.split('/').pop();
+            } catch (e) {
+                displayName = 'Link: ' + displayName.substring(0, 30) + '...';
+            }
+        }
+        
+        const escapedSource = group.source.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+        html += `
+            <div class="flex items-center justify-between p-2.5 bg-gray-50 rounded-xl border border-gray-100 hover:border-gray-200 transition">
+                <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-gray-700 truncate" title="${group.source}">${displayName}</p>
+                    <p class="text-[10px] text-gray-500">${group.count} แปลงแผนที่</p>
+                </div>
+                <button onclick="deleteImportedMap('${escapedSource}')"
+                    class="text-xs text-red-500 hover:text-red-700 p-1.5 rounded-lg hover:bg-red-50 transition ml-2 flex-shrink-0"
+                    title="ลบข้อมูลการนำเข้านี้">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
+        `;
+    });
+
+    listDiv.innerHTML = html;
+}
+
+async function deleteImportedMap(source) {
+    if (!supabaseClient || !currentUser) return;
+
+    const targetJobs = dbJobs.filter(j => j.category === currentUser.category && j.properties && j.properties.import_source === source);
+    if (targetJobs.length === 0) return;
+
+    const result = await Swal.fire({
+        title: 'ยืนยันการลบแผนที่นำเข้า?',
+        text: `แปลงที่ดินทั้งหมด ${targetJobs.length} รายการ จากแหล่งข้อมูล "${source}" จะถูกลบถาวรจากฐานข้อมูล รวมทั้งรูปภาพบันทึกต่างๆ (ถ้ามี)`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#d33',
+        cancelButtonColor: '#3085d6',
+        confirmButtonText: 'ลบข้อมูล',
+        cancelButtonText: 'ยกเลิก'
+    });
+
+    if (!result.isConfirmed) return;
+
+    showLoading(true, 'กำลังลบแผนที่นำเข้า...');
+
+    try {
+        const batchIds = targetJobs.map(j => j.id);
+
+        const imagesToDelete = [];
+        targetJobs.forEach(job => {
+            if (job.properties && job.properties.images && Array.isArray(job.properties.images)) {
+                job.properties.images.forEach(img => {
+                    const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
+                    if (publicId) {
+                        imagesToDelete.push(publicId);
+                    }
+                });
+            }
+        });
+
+        const { error } = await supabaseClient
+            .from('jobs')
+            .delete()
+            .in('id', batchIds);
+
+        if (error) throw error;
+
+        if (imagesToDelete.length > 0) {
+            imagesToDelete.forEach(publicId => {
+                fetch(GAS_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `action=delete&public_id=${encodeURIComponent(publicId)}`
+                }).catch(err => console.error("Cloudinary deletion failed on background:", err));
+            });
+        }
+
+        showLoading(false);
+        Swal.fire('ลบข้อมูลเรียบร้อย', `ลบแปลงที่ดินและรูปภาพทั้งหมด ${targetJobs.length} รายการออกแล้ว`, 'success');
+
+        await syncJobsFromDB();
+        renderImportedMapsList();
+    } catch (e) {
+        showLoading(false);
+        console.error("Delete imported map error", e);
+        Swal.fire('ลบล้มเหลว', e.message, 'error');
+    }
+}
 
 // --- Database & Category Modifiers ---
 function addCat() {
@@ -2697,3 +2941,7 @@ window.deleteSelectedImages = deleteSelectedImages;
 window.viewFullScreenImage = viewFullScreenImage;
 window.prevGalleryImage = prevGalleryImage;
 window.nextGalleryImage = nextGalleryImage;
+window.renderImportedMapsList = renderImportedMapsList;
+window.deleteImportedMap = deleteImportedMap;
+window.saveProfileCategory = saveProfileCategory;
+

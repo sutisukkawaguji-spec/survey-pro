@@ -970,6 +970,20 @@
                         </div>
                     </div>
 
+                    <!-- ประเภทงาน / โครงการที่กำลังสำรวจ -->
+                    <div class="p-4 border border-gray-200 rounded-2xl space-y-3 bg-gray-50/50">
+                        <label class="text-xs font-bold text-gray-700 block">ประเภทงาน / โครงการที่กำลังสำรวจ</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="inp-profile-category" placeholder="ระบุประเภทงาน เช่น ทั่วไป, ตรวจสอบ..."
+                                class="flex-1 p-2 border border-gray-300 rounded-xl bg-white text-sm outline-none focus:border-blue-500">
+                            <button onclick="saveProfileCategory()"
+                                class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
+                                บันทึก
+                            </button>
+                        </div>
+                        <p class="text-[9px] text-gray-500 leading-normal">ระบบจะแสดงผลและนำเข้าหมุดเฉพาะในประเภทงานนี้เท่านั้น</p>
+                    </div>
+
                     <div class="space-y-2">
                         <label class="text-xs font-bold text-gray-600 ml-1">สมาชิกในทีมที่กำลังสำรวจร่วมกัน</label>
                         <div id="team-members-list" class="space-y-2 max-h-[150px] overflow-y-auto pr-1">
@@ -1177,6 +1191,22 @@
                 <div>
                     <label class="text-[10px] font-bold text-gray-500 block mb-1">4. เชื่อมโยง เนื้อที่ (Area)</label>
                     <select id="map-field-area"
+                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">5. เชื่อมโยง ข้อความสำรวจ (Note)</label>
+                    <select id="map-field-note"
+                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
+                        <!-- Options populated dynamically -->
+                    </select>
+                </div>
+
+                <div>
+                    <label class="text-[10px] font-bold text-gray-500 block mb-1">6. เชื่อมโยง สถานะสำรวจ (Status)</label>
+                    <select id="map-field-status"
                         class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
                         <!-- Options populated dynamically -->
                     </select>
