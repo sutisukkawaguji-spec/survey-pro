@@ -6,6 +6,10 @@ window.addEventListener('unhandledrejection', function (e) {
     alert('Unhandled Promise Rejection: ' + e.reason);
 });
 
+// --- Google Apps Script (GAS) Proxy Configuration ---
+// แทนที่ URL ด้านล่างด้วย URL จริงของคุณที่ได้จากการ Deploy Google Apps Script (ไฟล์ cod.gs) เป็น Web App
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbxYmkufBM6TGiY0TwSqI-Eq6RrTZBevQZqaBbs9IPZsAyBypBFXfvsXojkeVKcaoskb/exec';
+
 // --- Supabase Connection & Configuration ---
 let supabaseClient = null;
 let supabaseUrl = 'https://mrcwgnlpgirokhqpuryc.supabase.co';
@@ -219,6 +223,23 @@ async function syncJobsSilently() {
             .order('updated_at', { ascending: false });
 
         if (!error && data) {
+            // ป้องกันการล้างข้อมูลที่กำลังพิมพ์หรือรูปถ่ายพรีวิวที่กำลังเลือกค้างอยู่ขณะซิงค์ในพื้นหลัง (Background Sync)
+            if (selectedJobId) {
+                const localJob = dbJobs.find(j => j.id === selectedJobId);
+                const dbJobIndex = data.findIndex(j => j.id === selectedJobId);
+                const btnSave = document.getElementById('btn-save');
+                const isEditing = btnSave && !btnSave.classList.contains('hidden');
+
+                if (localJob && dbJobIndex !== -1 && isEditing) {
+                    data[dbJobIndex].properties = {
+                        ...data[dbJobIndex].properties,
+                        images: localJob.properties.images,
+                        name: document.getElementById('sheet-name').value,
+                        note: document.getElementById('sheet-note').value
+                    };
+                }
+            }
+
             dbJobs = data;
             renderMap(false);
             if (selectedJobId) {
@@ -226,7 +247,10 @@ async function syncJobsSilently() {
                 if (currentOpenJob) {
                     const nameActive = document.activeElement === document.getElementById('sheet-name');
                     const noteActive = document.activeElement === document.getElementById('sheet-note');
-                    if (!nameActive && !noteActive) {
+                    const btnSave = document.getElementById('btn-save');
+                    const isEditing = btnSave && !btnSave.classList.contains('hidden');
+
+                    if (!nameActive && !noteActive && !isEditing) {
                         openSheetSilently(currentOpenJob);
                     }
                 }
@@ -738,6 +762,8 @@ async function stopNav() {
 }
 
 function openSheet(job) {
+    selectedImagesToDelete = [];
+    updateDeleteSelectedButton();
     selectedJobId = job.id;
     const p = job.properties;
     document.getElementById('sheet-title').innerText = p.name || 'รายละเอียด';
@@ -894,6 +920,8 @@ function openSheetSilently(job) {
 }
 
 function enableEdit() {
+    selectedImagesToDelete = [];
+    updateDeleteSelectedButton();
     toggleInputs(true);
     document.getElementById('btn-save').classList.remove('hidden');
     document.getElementById('btn-edit').classList.add('hidden');
@@ -912,6 +940,8 @@ function closeSheet(e) {
     document.getElementById('fab-container').classList.remove('sheet-open');
     if (isNavigating) stopNav();
     selectedJobId = null;
+    selectedImagesToDelete = [];
+    updateDeleteSelectedButton();
 }
 
 function toggleSheetSize() {
@@ -1222,65 +1252,65 @@ async function saveData() {
     }
 }
 
-function deleteJob() {
+async function deleteJob() {
     const job = dbJobs.find(x => x.id === selectedJobId);
     if (!job) return;
 
-    const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
+    if (job.status === 'done') {
+        const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
 
-    let htmlContent = `
-                <div class="text-sm text-gray-600 text-left space-y-2">
-                    <p>ระบบจะลบผลการสำรวจ (หมายเหตุ, รูปถ่าย, วันที่) และคืนค่าสถานะแปลงนี้ให้เป็น <b>"รอการตรวจสอบ"</b></p>
-                    <p class="text-red-500 font-bold">* แปลงที่ดินจะยังคงแสดงอยู่บนแผนที่ตามปกติ</p>
-            `;
-
-    if (hasImages) {
-        htmlContent += `
-                    <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2">
-                        <input type="checkbox" id="swal-delete-cloud-images" class="w-4 h-4 rounded text-red-650 focus:ring-red-500 cursor-pointer">
-                        <label for="swal-delete-cloud-images" class="text-xs font-bold text-gray-700 cursor-pointer select-none">
-                            ลบรูปภาพทั้งหมด (${job.properties.images.length} รูป) ออกจาก Cloudinary ด้วย
-                        </label>
-                    </div>
+        let htmlContent = `
+                    <div class="text-sm text-gray-600 text-left space-y-2">
+                        <p>ระบบจะลบผลการสำรวจ (หมายเหตุ, รูปถ่าย, วันที่) และคืนค่าสถานะแปลงนี้ให้เป็น <b>"รอการตรวจสอบ"</b></p>
+                        <p class="text-red-500 font-bold">* แปลงที่ดินจะยังคงแสดงอยู่บนแผนที่ตามปกติ</p>
                 `;
-    }
 
-    htmlContent += `</div>`;
-
-    Swal.fire({
-        title: 'ลบข้อมูลการสำรวจ?',
-        html: htmlContent,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        confirmButtonText: 'ยืนยันการลบข้อมูลสำรวจ',
-        cancelButtonText: 'ยกเลิก',
-        preConfirm: () => {
-            const chk = document.getElementById('swal-delete-cloud-images');
-            return {
-                deleteFromCloud: chk ? chk.checked : false
-            };
+        if (hasImages) {
+            htmlContent += `
+                        <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2">
+                            <input type="checkbox" id="swal-delete-cloud-images" class="w-4 h-4 rounded text-red-650 focus:ring-red-500 cursor-pointer">
+                            <label for="swal-delete-cloud-images" class="text-xs font-bold text-gray-700 cursor-pointer select-none">
+                                ลบรูปภาพทั้งหมด (${job.properties.images.length} รูป) ออกจาก Cloudinary ด้วย
+                            </label>
+                        </div>
+                    `;
         }
-    }).then(async (r) => {
-        if (r.isConfirmed) {
-            const deleteFromCloud = r.value.deleteFromCloud;
+
+        htmlContent += `</div>`;
+
+        const result = await Swal.fire({
+            title: 'ลบข้อมูลการสำรวจ?',
+            html: htmlContent,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            confirmButtonText: 'ยืนยันการลบข้อมูลสำรวจ',
+            cancelButtonText: 'ยกเลิก',
+            preConfirm: () => {
+                const chk = document.getElementById('swal-delete-cloud-images');
+                return {
+                    deleteFromCloud: chk ? chk.checked : false
+                };
+            }
+        });
+
+        if (result.isConfirmed) {
+            const deleteFromCloud = result.value.deleteFromCloud;
             showLoading(true, 'กำลังลบผลการสำรวจ...');
             try {
-                // 1. If checked, delete images from Cloudinary
                 if (deleteFromCloud && hasImages) {
-                    const GAS_WEBAPP_URL = "https://script.google.com/macros/s/AKfycbxYmkufBM6TGiY0TwSqI-Eq6RrTZBevQZqaBbs9IPZsAyBypBFXfvsXojkeVKcaoskb/exec";
-                    for (const img of job.properties.images) {
-                        if (img.public_id) {
+                    await Promise.all(job.properties.images.map(async (img) => {
+                        const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
+                        if (publicId) {
                             try {
-                                await fetch(GAS_WEBAPP_URL, {
-                                    method: 'POST',
-                                    body: JSON.stringify({ publicId: img.public_id })
-                                });
+                                const res = await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId));
+                                const data = await res.json();
+                                console.log("Cloudinary response:", data);
                             } catch (err) {
-                                console.error("GAS Cloudinary loop delete failed", err);
+                                console.error("ลบ Cloudinary พลาด:", err);
                             }
                         }
-                    }
+                    }));
                 }
 
                 // 2. Clear survey properties and reset status to 'waiting'
@@ -1301,7 +1331,40 @@ function deleteJob() {
                 showLoading(false);
             }
         }
-    });
+    } else {
+        const jobIndex = dbJobs.findIndex(j => j.id === selectedJobId);
+        if (jobIndex === -1) return;
+
+        const confirm = await Swal.fire({
+            title: 'ยืนยันการลบ?',
+            text: "คุณต้องการลบรายการนี้ออกจากระบบถาวรใช่หรือไม่?",
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'ลบ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (confirm.isConfirmed) {
+            showLoading(true, 'กำลังลบข้อมูล...');
+            try {
+                const { error } = await supabaseClient
+                    .from('jobs')
+                    .delete()
+                    .eq('id', selectedJobId);
+
+                if (error) throw error;
+
+                dbJobs.splice(jobIndex, 1);
+                renderMap();
+                closeSheet();
+                Swal.fire('ลบสำเร็จ', 'รายการนี้ถูกลบแล้ว', 'success');
+            } catch (e) {
+                Swal.fire('ล้มเหลว', e.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+    }
 }
 
 function navGoogle() {
@@ -2010,14 +2073,34 @@ function generateReport(jobs) {
         const images = j.properties.images || [];
 
         let imagesHtml = '';
-        if (images.length > 0) {
+        const parsedImages = typeof images === 'string' ? (() => { try { return JSON.parse(images); } catch (e) { return []; } })() : images;
+        if (Array.isArray(parsedImages) && parsedImages.length > 0) {
             imagesHtml = '<div class="image-gallery">';
-            images.forEach(img => {
-                imagesHtml += `
-                            <div class="image-card">
-                                <img src="${img.url}" alt="ภาพถ่ายสำรวจ">
-                            </div>
-                        `;
+            parsedImages.forEach(img => {
+                let url = '';
+                if (img) {
+                    if (typeof img === 'string') {
+                        if (img.startsWith('{')) {
+                            try {
+                                const parsed = JSON.parse(img);
+                                url = parsed.url || parsed.secure_url || '';
+                            } catch (e) {
+                                url = img;
+                            }
+                        } else {
+                            url = img;
+                        }
+                    } else if (typeof img === 'object') {
+                        url = img.url || img.secure_url || '';
+                    }
+                }
+                if (url) {
+                    imagesHtml += `
+                                <div class="image-card">
+                                    <img src="${url}" alt="ภาพถ่ายสำรวจ">
+                                </div>
+                            `;
+                }
             });
             imagesHtml += '</div>';
         } else {
@@ -2169,7 +2252,12 @@ function renderImageGallery(images, editable) {
     if (!container) return;
     container.innerHTML = '';
 
-    if (images.length === 0) {
+    // แปลงหากข้อมูลถูกบันทึกเป็น string
+    if (typeof images === 'string') {
+        try { images = JSON.parse(images); } catch (e) { images = []; }
+    }
+
+    if (!Array.isArray(images) || images.length === 0) {
         container.innerHTML = `<div class="text-xs text-gray-400 flex items-center justify-center w-full py-4 bg-gray-50 rounded-xl border border-dashed border-gray-200">
                     <i class="fa-solid fa-image mr-1"></i> ยังไม่มีรูปถ่ายแปลงสำรวจ
                 </div>`;
@@ -2177,54 +2265,154 @@ function renderImageGallery(images, editable) {
     }
 
     images.forEach((img, idx) => {
-        const url = typeof img === 'string' ? img : img.url;
+        let url = '';
+        if (img) {
+            if (typeof img === 'string') {
+                if (img.startsWith('{')) {
+                    try {
+                        const parsed = JSON.parse(img);
+                        url = parsed.url || parsed.secure_url || '';
+                    } catch (e) {
+                        url = img;
+                    }
+                } else {
+                    url = img;
+                }
+            } else if (typeof img === 'object') {
+                url = img.url || img.secure_url || '';
+            }
+        }
+
+        if (!url) return;
 
         const card = document.createElement('div');
-        card.className = 'relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-gray-200 shadow-sm cursor-pointer group bg-gray-100';
+        card.className = 'relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-gray-200 shadow-sm cursor-pointer group bg-gray-100 transition duration-200';
 
         const imgEl = document.createElement('img');
         imgEl.src = url;
         imgEl.className = 'w-full h-full object-cover';
-        imgEl.onclick = () => viewFullScreenImage(url);
         card.appendChild(imgEl);
 
         if (editable) {
-            const delBtn = document.createElement('button');
-            delBtn.className = 'absolute top-0 right-0 w-7 h-7 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition shadow-lg';
-            delBtn.style.zIndex = '50';
-            delBtn.style.touchAction = 'manipulation';
-            delBtn.innerHTML = '<i class="fa-solid fa-xmark text-xs"></i>';
-            delBtn.addEventListener('click', (e) => {
+            // โหมดแก้ไข: คลิกที่รูป/การ์ด เพื่อเลือก/ยกเลิกการเลือกรูปภาพ
+            const isSelected = selectedImagesToDelete.includes(url);
+            if (isSelected) {
+                card.classList.add('ring-2', 'ring-red-500');
+            }
+
+            // แสดงวงกลมติ๊กถูกที่มุมขวาบน
+            const badge = document.createElement('div');
+            badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition';
+            if (isSelected) {
+                badge.className += ' bg-red-500 border-red-500 text-white';
+                badge.innerHTML = '<i class="fa-solid fa-check text-[10px]"></i>';
+            } else {
+                badge.className += ' bg-white/80 border-gray-300 text-transparent';
+                badge.innerHTML = '<i class="fa-solid fa-check text-[10px]"></i>';
+            }
+            card.appendChild(badge);
+
+            const toggleSelect = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                deleteJobImage(idx);
-            });
-            delBtn.addEventListener('touchend', (e) => {
+                const nowSelected = selectedImagesToDelete.includes(url);
+                if (!nowSelected) {
+                    selectedImagesToDelete.push(url);
+                    card.classList.add('ring-2', 'ring-red-500');
+                    badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition bg-red-500 border-red-500 text-white';
+                } else {
+                    selectedImagesToDelete = selectedImagesToDelete.filter(x => x !== url);
+                    card.classList.remove('ring-2', 'ring-red-500');
+                    badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition bg-white/80 border-gray-300 text-transparent';
+                }
+                updateDeleteSelectedButton();
+            };
+
+            card.addEventListener('click', toggleSelect);
+            card.addEventListener('touchend', toggleSelect);
+        } else {
+            // โหมดปกติ: คลิกเพื่อเปิดขยายดูรูปแบบเต็มหน้าจอ
+            const handleView = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                deleteJobImage(idx);
-            });
-            card.appendChild(delBtn);
+                viewFullScreenImage(images, idx);
+            };
+            card.addEventListener('click', handleView);
+            card.addEventListener('touchend', handleView);
         }
 
         container.appendChild(card);
     });
 }
 
-function viewFullScreenImage(url) {
+function getPublicIdFromUrl(url) {
+    if (!url || typeof url !== 'string') return null;
+    try {
+        const parts = url.split('/image/upload/');
+        if (parts.length < 2) return null;
+        const pathAfterUpload = parts[1];
+        const pathParts = pathAfterUpload.split('/');
+        if (pathParts[0].match(/^v\d+$/)) {
+            pathParts.shift();
+        }
+        const remaining = pathParts.join('/');
+        const lastDotIdx = remaining.lastIndexOf('.');
+        if (lastDotIdx !== -1) {
+            return remaining.substring(0, lastDotIdx);
+        }
+        return remaining;
+    } catch (e) {
+        console.error("Error parsing public id from URL:", e);
+        return null;
+    }
+}
+
+let currentGalleryImages = [];
+let currentGalleryIndex = 0;
+let selectedImagesToDelete = [];
+
+function viewFullScreenImage(data, startIndex = 0) {
+    const formattedData = Array.isArray(data) ? data.map(item => {
+        if (typeof item === 'string') return { url: item };
+        return item;
+    }) : [{ url: data }];
+
+    currentGalleryImages = formattedData;
+    currentGalleryIndex = startIndex;
+    showGallerySwal();
+}
+
+function showGallerySwal() {
+    const img = currentGalleryImages[currentGalleryIndex];
+    if (!img) return;
+    const url = img.url || img;
+
+    const hasPrev = currentGalleryIndex > 0;
+    const hasNext = currentGalleryIndex < currentGalleryImages.length - 1;
+
     Swal.fire({
-        imageUrl: url,
-        imageAlt: 'รูปถ่ายแปลงสำรวจ',
-        showConfirmButton: false,
         showCloseButton: true,
-        background: 'rgba(0,0,0,0.9)',
-        width: 'auto',
-        maxWidth: '95vw',
+        closeButtonHtml: '<i class="fa-solid fa-times"></i>',
+        html: `
+            <div class="relative flex items-center justify-center w-full h-[70vh]">
+                ${hasPrev ? `<button onclick="prevGalleryImage()" class="absolute left-2 z-[9999] w-10 h-10 bg-black/50 text-white rounded-full hover:bg-black/80 transition flex items-center justify-center"><i class="fa-solid fa-chevron-left"></i></button>` : ''}
+                <img src="${url}" class="max-h-full max-w-full object-contain" />
+                ${hasNext ? `<button onclick="nextGalleryImage()" class="absolute right-2 z-[9999] w-10 h-10 bg-black/50 text-white rounded-full hover:bg-black/80 transition flex items-center justify-center"><i class="fa-solid fa-chevron-right"></i></button>` : ''}
+            </div>
+            <div class="text-white mt-2 font-bold">${currentGalleryIndex + 1} / ${currentGalleryImages.length}</div>
+        `,
+        showConfirmButton: false,
+        background: 'transparent',
+        width: '100vw',
+        padding: '0',
         customClass: {
-            image: 'max-h-[80vh] object-contain rounded-xl'
+            closeButton: 'text-white hover:text-red-500'
         }
     });
 }
+
+function prevGalleryImage() { if (currentGalleryIndex > 0) { currentGalleryIndex--; showGallerySwal(); } }
+function nextGalleryImage() { if (currentGalleryIndex < currentGalleryImages.length - 1) { currentGalleryIndex++; showGallerySwal(); } }
 
 function triggerCamera() {
     const job = dbJobs.find(j => j.id === selectedJobId);
@@ -2302,7 +2490,7 @@ async function deleteJobImage(idx) {
 
     const img = job.properties.images[idx];
 
-    Swal.fire({
+    const result = await Swal.fire({
         title: 'ยืนยันลบรูปถ่าย?',
         text: 'รูปนี้จะถูกลบออก',
         icon: 'warning',
@@ -2310,48 +2498,128 @@ async function deleteJobImage(idx) {
         confirmButtonColor: '#ef4444',
         confirmButtonText: 'ลบรูป',
         cancelButtonText: 'ยกเลิก'
-    }).then(async (r) => {
-        if (r.isConfirmed) {
-            showLoading(true, 'กำลังลบรูปภาพ...');
-            try {
-                // กรณีที่ 1: เป็นรูปพรีวิว (ผู้ใช้เพิ่งเลือก แต่ยังไม่ได้กดเซฟ) 
-                // -> ลบจากหน้าจอได้เลย ไม่ต้องวิ่งไปกวนหลังบ้าน
-                if (img.isTemp) {
-                    URL.revokeObjectURL(img.url); // คืนพื้นที่หน่วยความจำให้มือถือ
-                    job.properties.images.splice(idx, 1);
-                    renderImageGallery(job.properties.images, true);
-                    Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปพรีวิวทิ้งแล้ว', timer: 1000, showConfirmButton: false });
-                }
-                // กรณีที่ 2: เป็นรูปที่อัปโหลดขึ้น Cloudinary ไปแล้ว (มี public_id)
-                else if (img.public_id) {
-                    // ⚠️ วาง URL ของ Google Apps Script ที่ช่องนี้
-                    const GAS_WEBAPP_URL = "วาง_URL_ที่ได้จาก_Google_Apps_Script_ตรงนี้";
-
-                    const response = await fetch(GAS_WEBAPP_URL, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                        body: JSON.stringify({ publicId: img.public_id })
-                    });
-
-                    const rawText = await response.text();
-                    const data = JSON.parse(rawText);
-
-                    if (data.success && data.result && data.result.result === "ok") {
-                        job.properties.images.splice(idx, 1);
-                        renderImageGallery(job.properties.images, true);
-                        Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปออกจากคลาวด์แล้ว', timer: 1500, showConfirmButton: false });
-                    } else {
-                        Swal.fire('Cloudinary ปฏิเสธการลบ', JSON.stringify(data), 'error');
-                    }
-                }
-            } catch (e) {
-                console.error("ระบบลบภาพล้มเหลว", e);
-                Swal.fire('ล้มเหลว', e.message, 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
     });
+
+    if (result.isConfirmed) {
+        showLoading(true, 'กำลังลบรูปภาพ...');
+        try {
+            // กรณีที่ 1: เป็นรูปพรีวิว (ผู้ใช้เพิ่งเลือก แต่ยังไม่ได้กดเซฟ) 
+            // -> ลบจากหน้าจอได้เลย ไม่ต้องวิ่งไปกวนหลังบ้าน
+            if (img.isTemp) {
+                if (img.url && img.url.startsWith('blob:')) {
+                    URL.revokeObjectURL(img.url); // คืนพื้นที่หน่วยความจำให้มือถือ
+                }
+                job.properties.images.splice(idx, 1);
+                renderImageGallery(job.properties.images, true);
+                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปพรีวิวทิ้งแล้ว', timer: 1000, showConfirmButton: false });
+            }
+            // กรณีที่ 2: เป็นรูปที่อัปโหลดขึ้น Cloudinary ไปแล้ว (มี public_id หรือแกะจาก URL ได้)
+            else {
+                const publicId = img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url);
+                if (publicId) {
+                    // ใช้ mode: 'no-cors' เพื่อป้องกัน CORS redirection error จาก Google Apps Script
+                    await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
+                }
+                
+                // ลบรูปภาพออกจากรายการและบันทึกข้อมูล
+                job.properties.images.splice(idx, 1);
+                await saveJobToSupabase(job);
+                renderImageGallery(job.properties.images, true);
+                
+                // รีเซ็ตการเลือกถ้ามีรูปที่เลือกถูกลบออกไปเดี่ยวๆ
+                selectedImagesToDelete = selectedImagesToDelete.filter(x => x !== (typeof img === 'string' ? img : img.url));
+                updateDeleteSelectedButton();
+                
+                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปภาพสำเร็จ', timer: 1500, showConfirmButton: false });
+            }
+        } catch (e) {
+            console.error("ระบบลบภาพล้มเหลว", e);
+            Swal.fire('ล้มเหลว', e.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+}
+
+function updateDeleteSelectedButton() {
+    const btn = document.getElementById('btn-delete-selected');
+    const countEl = document.getElementById('delete-selected-count');
+    if (!btn || !countEl) return;
+
+    if (selectedImagesToDelete.length > 0) {
+        countEl.textContent = selectedImagesToDelete.length;
+        btn.classList.remove('hidden');
+    } else {
+        btn.classList.add('hidden');
+    }
+}
+
+async function deleteSelectedImages() {
+    const job = dbJobs.find(j => j.id === selectedJobId);
+    if (!job || !job.properties.images || selectedImagesToDelete.length === 0) return;
+
+    const count = selectedImagesToDelete.length;
+    const result = await Swal.fire({
+        title: `ยืนยันลบรูปถ่ายที่เลือก?`,
+        text: `รูปที่เลือกจำนวน ${count} รูปจะถูกลบออกอย่างถาวร`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'ลบรูปภาพที่เลือก',
+        cancelButtonText: 'ยกเลิก'
+    });
+
+    if (result.isConfirmed) {
+        showLoading(true, 'กำลังลบรูปภาพที่เลือก...');
+        try {
+            const imagesToProcess = [...job.properties.images];
+            const remainingImages = [];
+            const urlsToDeleteFromCloud = [];
+
+            for (let img of imagesToProcess) {
+                const url = typeof img === 'string' ? img : img.url;
+                if (selectedImagesToDelete.includes(url)) {
+                    if (img.isTemp) {
+                        if (img.url && img.url.startsWith('blob:')) {
+                            URL.revokeObjectURL(img.url);
+                        }
+                    } else {
+                        const publicId = img.public_id || getPublicIdFromUrl(url);
+                        if (publicId) {
+                            urlsToDeleteFromCloud.push(publicId);
+                        }
+                    }
+                } else {
+                    remainingImages.push(img);
+                }
+            }
+
+            // ส่งคำขอลบไปยัง Cloudinary ผ่าน GAS ด้วย GET + no-cors
+            if (urlsToDeleteFromCloud.length > 0) {
+                await Promise.all(urlsToDeleteFromCloud.map(async (publicId) => {
+                    try {
+                        await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
+                    } catch (err) {
+                        console.error("ลบภาพจากคลาวด์ไม่สำเร็จ:", publicId, err);
+                    }
+                }));
+            }
+
+            job.properties.images = remainingImages;
+            await saveJobToSupabase(job);
+
+            selectedImagesToDelete = [];
+            updateDeleteSelectedButton();
+            renderImageGallery(job.properties.images, true);
+
+            Swal.fire({ toast: true, icon: 'success', title: `ลบรูปภาพที่เลือกเรียบร้อยแล้ว`, timer: 1500, showConfirmButton: false });
+        } catch (e) {
+            console.error("ระบบลบภาพล้มเหลว", e);
+            Swal.fire('ล้มเหลว', e.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
 }
 
 // Export handlers to window for inline HTML event listener compatibility
@@ -2392,3 +2660,8 @@ window.navigateExportCalendar = navigateExportCalendar;
 window.selectExportDate = selectExportDate;
 window.confirmExportCalendar = confirmExportCalendar;
 window.closeImportMappingModal = closeImportMappingModal;
+window.deleteJobImage = deleteJobImage;
+window.deleteSelectedImages = deleteSelectedImages;
+window.viewFullScreenImage = viewFullScreenImage;
+window.prevGalleryImage = prevGalleryImage;
+window.nextGalleryImage = nextGalleryImage;
