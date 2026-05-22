@@ -222,7 +222,7 @@ async function loadUserProfileAndData(authUser) {
 
         updateUserInfo();
         showAuthOverlay(false);
-        await syncJobsFromDB();
+        await syncJobsFromDB(true);
     } else {
         throw new Error("ระบบไม่สามารถสร้างโปรไฟล์ได้ในขณะนี้ กรุณาลองล็อกอินใหม่อีกครั้ง");
     }
@@ -243,7 +243,7 @@ async function handleLogout() {
 }
 
 // --- Data Sync with Supabase ---
-async function syncJobsFromDB() {
+async function syncJobsFromDB(fitBounds = false) {
     if (!supabaseClient || !currentUser) return;
     showLoading(true, 'กำลังโหลดข้อมูลแปลงสำรวจ...');
     try {
@@ -289,7 +289,7 @@ async function syncJobsFromDB() {
         renderImportedMapsList();
 
         updateAmphoeDropdown();
-        renderMap(true);
+        renderMap(fitBounds);
     } catch (e) {
         console.error("Fetch jobs error", e);
         Swal.fire('โหลดจุดแผนที่ล้มเหลว', e.message, 'error');
