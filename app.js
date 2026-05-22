@@ -284,7 +284,7 @@ async function syncJobsFromDB() {
         }
         categories = Array.from(dbCategories);
         localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
-        
+
         updateUserInfo();
         renderImportedMapsList();
 
@@ -433,6 +433,10 @@ let navInterval = null;
 let markerJustClicked = false;
 let isMapClickBlocked = false;
 let justDeletedJobId = null;
+window.imagesToDeleteFromCloud = [];
+window.originalImagesBackup = [];
+window.pendingGeomanUpdates = new Map();
+
 
 // Override Swal.fire to prevent overlapping/frozen alerts, especially on iOS Safari
 if (window.Swal) {
@@ -534,6 +538,179 @@ function initApp() {
             btn.classList.add('text-gray-400');
         }
     }
+
+    // Initialize Leaflet Geoman Controls
+    if (map.pm) {
+        map.pm.addControls({
+            position: 'bottomright',
+            drawMarker: true,
+            drawCircle: true,
+            drawRectangle: true,
+            drawPolygon: true,
+            drawPolyline: false,
+            drawCircleMarker: false,
+            editMode: true,
+            dragMode: true,
+            rotateMode: true,
+            removalMode: true,
+            drawText: false,
+            cutPolygon: false
+        });
+
+        // ตั้งค่าภาษาไทยสำหรับเครื่องมือวาด Geoman (รองรับคำแปลบางส่วนของ Geoman)
+        map.pm.setLang('th');
+
+        // ดักจับเหตุการณ์การปิดโหมดแก้ไขระดับแผนที่เพื่อประมวลผลการเซฟสะสม
+        map.on('pm:globaleditmodetoggled', (e) => {
+            if (!e.enabled) {
+                savePendingGeomanUpdates();
+            }
+        });
+        map.on('pm:globaldragmodetoggled', (e) => {
+            if (!e.enabled) {
+                savePendingGeomanUpdates();
+            }
+        });
+        map.on('pm:globalrotatemodetoggled', (e) => {
+            if (!e.enabled) {
+                savePendingGeomanUpdates();
+            }
+        });
+
+        // ดักจับเมื่อมีการลบเลเยอร์ด้วยเครื่องมือลบของ Geoman
+        map.on('pm:remove', async (e) => {
+            const removedLayer = e.layer;
+            const jobId = removedLayer.jobId;
+            if (jobId) {
+                const job = dbJobs.find(x => x.id === jobId);
+                if (job) {
+                    selectedJobId = jobId;
+                    await deleteJob();
+                    // หากไม่ได้ทำการลบจริง (เช่น กดยกเลิก) ให้แสดงผลแผนที่ใหม่เพื่อคืนค่าเลเยอร์กลับมา
+                    if (dbJobs.find(x => x.id === jobId)) {
+                        renderMap();
+                    }
+                }
+            }
+        });
+
+        map.on('pm:create', async (e) => {
+            const layer = e.layer;
+            const shape = e.shape; // 'Marker', 'Rectangle', 'Polygon', 'Circle'
+
+            const currentCategory = currentUser.category || 'ทั่วไป';
+            const categoryOptionsHtml = categories.map(cat => {
+                const isSelected = cat === currentCategory ? 'selected' : '';
+                return `<option value="${cat}" ${isSelected}>${cat}</option>`;
+            }).join('');
+
+            Swal.fire({
+                title: 'บันทึกรูปแปลง / ปักหมุดใหม่',
+                html: `
+                    <div class="text-left space-y-3">
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">ชื่อแปลง / เลขทะเบียนที่ดิน (จำเป็น)</label>
+                            <input id="swal-draw-name" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans" placeholder="กรอกชื่อหรือหมายเลขทะเบียน...">
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">รายละเอียด / หมายเหตุ</label>
+                            <textarea id="swal-draw-note" rows="3" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans" placeholder="บันทึกข้อมูลเพิ่มเติม..."></textarea>
+                        </div>
+                        <div>
+                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">ประเภทงาน / โครงการ</label>
+                            <select id="swal-draw-category" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans">
+                                ${categoryOptionsHtml}
+                            </select>
+                        </div>
+                    </div>
+                `,
+                showCancelButton: true,
+                confirmButtonText: 'บันทึกข้อมูล',
+                confirmButtonColor: '#2563eb',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: () => {
+                    const name = document.getElementById('swal-draw-name').value.trim();
+                    const note = document.getElementById('swal-draw-note').value.trim();
+                    const category = document.getElementById('swal-draw-category').value;
+                    if (!name) {
+                        Swal.showValidationMessage('กรุณากรอกชื่อแปลง / เลขทะเบียนที่ดิน');
+                        return false;
+                    }
+                    return { name, note, category };
+                }
+            }).then(async (result) => {
+                if (result.isConfirmed) {
+                    const { name, note, category } = result.value;
+
+                    let geometry = {};
+                    let lat = 0;
+                    let lng = 0;
+                    let isCircle = false;
+                    let radius = 0;
+
+                    if (shape === 'Circle') {
+                        const center = layer.getLatLng();
+                        lat = center.lat;
+                        lng = center.lng;
+                        isCircle = true;
+                        radius = layer.getRadius();
+                        geometry = {
+                            type: 'Point',
+                            coordinates: [lng, lat]
+                        };
+                    } else if (shape === 'Marker') {
+                        const pos = layer.getLatLng();
+                        lat = pos.lat;
+                        lng = pos.lng;
+                        geometry = {
+                            type: 'Point',
+                            coordinates: [lng, lat]
+                        };
+                    } else {
+                        // Rectangle หรือ Polygon
+                        geometry = layer.toGeoJSON().geometry;
+                        const bounds = layer.getBounds();
+                        const center = bounds.getCenter();
+                        lat = center.lat;
+                        lng = center.lng;
+                    }
+
+                    const newJob = {
+                        id: 'drawn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
+                        lat: lat,
+                        lng: lng,
+                        geometry: geometry,
+                        status: 'done',
+                        category: category,
+                        properties: {
+                            name: name,
+                            note: note,
+                            is_custom_draw: true,
+                            is_circle: isCircle,
+                            radius: radius,
+                            images: [],
+                            date: new Date().toISOString().split('T')[0]
+                        }
+                    };
+
+                    showLoading(true, 'กำลังบันทึกข้อมูลรูปแปลง/หมุด...');
+                    try {
+                        await saveJobToSupabase(newJob);
+                        dbJobs.push(newJob);
+                        renderMap();
+                        Swal.fire({ toast: true, icon: 'success', title: 'สร้างรูปแปลง/หมุดใหม่สำเร็จ', timer: 1500, showConfirmButton: false });
+                    } catch (err) {
+                        console.error("Save drawn job error:", err);
+                        Swal.fire('เกิดข้อผิดพลาด', 'บันทึกล้มเหลว: ' + err.message, 'error');
+                    } finally {
+                        showLoading(false);
+                    }
+                }
+                // ลบ layer ชั่วคราวเพื่อให้ renderMap วาดของจริงขึ้นมาแทน
+                layer.remove();
+            });
+        });
+    }
 }
 
 function startGpsTracking() {
@@ -545,7 +722,8 @@ function startGpsTracking() {
         const latlng = [p.coords.latitude, p.coords.longitude];
         if (!userMarker) {
             userMarker = L.marker(latlng, {
-                icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
+                icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' }),
+                pmIgnore: true
             }).addTo(map);
         } else {
             userMarker.setLatLng(latlng);
@@ -570,12 +748,12 @@ function updateGpsStatus() {
 
 function resetGps() {
     showLoading(true, 'กำลังเปิดขอสิทธิ์ GPS อีกครั้ง...');
-    
+
     if (gpsWatchId) {
         navigator.geolocation.clearWatch(gpsWatchId);
         gpsWatchId = null;
     }
-    
+
     if (userMarker) {
         map.removeLayer(userMarker);
         userMarker = null;
@@ -585,11 +763,11 @@ function resetGps() {
         isGpsActive = true;
         updateGpsStatus();
         const latlng = [p.coords.latitude, p.coords.longitude];
-        
+
         userMarker = L.marker(latlng, {
             icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
         }).addTo(map);
-        
+
         map.setView(latlng, 17);
         isFollowing = true;
         const btnGps = document.getElementById('btn-gps');
@@ -630,12 +808,12 @@ function updateUserInfo() {
     document.getElementById('profile-display-name').innerText = currentUser.name;
     document.getElementById('profile-email').innerText = currentUser.email || '-';
     document.getElementById('profile-user-code').innerText = currentUser.user_code || '------';
-    
+
     // Populate profile category select dropdown (only reading from active imported map categories)
     const selProfileCat = document.getElementById('sel-profile-category');
     if (selProfileCat) {
         selProfileCat.innerHTML = '';
-        
+
         let activeCats = Array.from(new Set(dbJobs.map(j => j.category).filter(Boolean)));
         if (!activeCats.includes('ทั่วไป')) {
             activeCats.push('ทั่วไป');
@@ -644,7 +822,7 @@ function updateUserInfo() {
         if (!activeCats.includes(currentCat)) {
             activeCats.push(currentCat);
         }
-        
+
         activeCats.sort();
 
         activeCats.forEach(cat => {
@@ -652,13 +830,13 @@ function updateUserInfo() {
         });
         selProfileCat.value = currentCat;
     }
-    
+
     const catInput = document.getElementById('inp-profile-category');
     if (catInput) {
         catInput.value = '';
         catInput.classList.add('hidden');
     }
-    
+
     updateGpsStatus();
 }
 
@@ -677,7 +855,7 @@ function saveProfileCategory() {
 
     updateUserInfo();
     updateCounter();
-    
+
     // Sync from database and re-draw markers with the new category
     syncJobsFromDB();
 
@@ -756,7 +934,169 @@ function getFilteredJobs() {
     });
 }
 
+function bindGeomanEvents(layer, jobId) {
+    if (!layer) return;
+
+    const bindToSingleLayer = (l) => {
+        // จำกัดไม่ให้ทำการหมุนบน Marker และ Circle เพื่อเลี่ยงข้อผิดพลาด
+        const isMarker = l instanceof L.Marker || (typeof l.getLatLng === 'function' && typeof l.getBounds !== 'function');
+        const isCircle = typeof l.getRadius === 'function';
+        if (isMarker || isCircle) {
+            if (l.pm) {
+                l.pm.setOptions({ allowRotation: false });
+            }
+        }
+
+        // ดักจับเหตุการณ์การแก้ไข ย้าย และหมุน
+        l.on('pm:edit', () => queueGeomanUpdate(l, jobId));
+        l.on('pm:dragend', () => queueGeomanUpdate(l, jobId));
+        l.on('pm:rotateend', () => queueGeomanUpdate(l, jobId));
+        l.on('pm:revert', () => dequeueGeomanUpdate(jobId));
+    };
+
+    if (typeof layer.eachLayer === 'function') {
+        layer.eachLayer(sub => {
+            bindToSingleLayer(sub);
+        });
+    } else {
+        bindToSingleLayer(layer);
+    }
+}
+
+// --- คิวจัดการเก็บพิกัดที่มีการขยับ/แก้ไขชั่วคราว ---
+function queueGeomanUpdate(l, jobId) {
+    let lat = 0;
+    let lng = 0;
+    let geometry = {};
+    let isCircle = false;
+    let radius = 0;
+
+    if (typeof l.getRadius === 'function') {
+        // Circle (วงกลม)
+        const center = l.getLatLng();
+        lat = center.lat;
+        lng = center.lng;
+        isCircle = true;
+        radius = l.getRadius();
+        geometry = {
+            type: 'Point',
+            coordinates: [lng, lat]
+        };
+    } else if (l instanceof L.Marker || (typeof l.getLatLng === 'function' && typeof l.getBounds !== 'function')) {
+        // Marker (จุดพิกัด)
+        const pos = l.getLatLng();
+        lat = pos.lat;
+        lng = pos.lng;
+        geometry = {
+            type: 'Point',
+            coordinates: [lng, lat]
+        };
+    } else if (typeof l.getBounds === 'function') {
+        // Polygon หรือ Rectangle (รูปแปลงสี่เหลี่ยม/หลายเหลี่ยม)
+        geometry = l.toGeoJSON().geometry;
+        const bounds = l.getBounds();
+        const center = bounds.getCenter();
+        lat = center.lat;
+        lng = center.lng;
+    }
+
+    window.pendingGeomanUpdates.set(jobId, { lat, lng, geometry, isCircle, radius });
+}
+
+function dequeueGeomanUpdate(jobId) {
+    if (window.pendingGeomanUpdates) {
+        window.pendingGeomanUpdates.delete(jobId);
+    }
+}
+
+async function savePendingGeomanUpdates() {
+    if (!window.pendingGeomanUpdates || window.pendingGeomanUpdates.size === 0) return;
+
+    const updates = Array.from(window.pendingGeomanUpdates.entries());
+    window.pendingGeomanUpdates.clear(); // ล้างคิวทันทีเพื่อป้องกันการบันทึกซ้อน
+
+    showLoading(true, 'กำลังบันทึกการเปลี่ยนแปลงรูปแปลง...');
+    try {
+        for (const [jobId, data] of updates) {
+            const job = dbJobs.find(x => x.id === jobId);
+            if (job) {
+                job.lat = data.lat;
+                job.lng = data.lng;
+                job.geometry = data.geometry;
+                if (!job.properties) job.properties = {};
+                if (data.isCircle) {
+                    job.properties.is_circle = true;
+                    job.properties.radius = data.radius;
+                }
+                await saveJobToSupabase(job);
+            }
+        }
+        Swal.fire({ toast: true, icon: 'success', title: 'บันทึกการเปลี่ยนแปลงรูปแปลงสำเร็จ', timer: 1500, showConfirmButton: false });
+    } catch (err) {
+        console.error("Geoman pending update error:", err);
+        Swal.fire('เกิดข้อผิดพลาด', 'บันทึกล้มเหลว: ' + err.message, 'error');
+        renderMap(); // โหลดพิกัดเดิมกลับมา
+    } finally {
+        showLoading(false);
+    }
+}
+
+function toggleGeomanToolbar(show) {
+    const container = document.querySelector('.leaflet-bottom.leaflet-right');
+    const btn = document.getElementById('btn-toggle-pm');
+    if (!container) return;
+
+    let isCurrentlyHidden = container.classList.contains('pm-hidden');
+    let shouldHide;
+    if (show !== undefined) {
+        shouldHide = !show;
+    } else {
+        shouldHide = !isCurrentlyHidden;
+    }
+
+    if (shouldHide) {
+        // ทำการซ่อนเครื่องมือ
+        container.classList.add('pm-hidden');
+        if (btn) {
+            btn.classList.remove('bg-purple-600', 'text-white');
+            btn.classList.add('bg-white', 'text-purple-600');
+            btn.innerHTML = '<i class="fa-solid fa-pen-ruler"></i>';
+        }
+        // สั่งปิดโหมดทำงานทั้งหมดของ Geoman ซึ่งจะกระตุ้นการบันทึกคิวชั่วคราวโดยอัตโนมัติ
+        if (map && map.pm) {
+            map.pm.disableGlobalEditMode();
+            map.pm.disableGlobalDragMode();
+            map.pm.disableGlobalRotateMode();
+            map.pm.disableGlobalRemovalMode();
+            if (map.pm.Draw) map.pm.Draw.disable();
+        }
+    } else {
+        // แสดงเครื่องมือ
+        container.classList.remove('pm-hidden');
+        if (btn) {
+            btn.classList.add('bg-purple-600', 'text-white');
+            btn.classList.remove('bg-white', 'text-purple-600');
+            btn.innerHTML = '<i class="fa-solid fa-xmark"></i>';
+        }
+    }
+}
+window.toggleGeomanToolbar = toggleGeomanToolbar;
+
 function renderMap(fitBounds = false) {
+    // ปิดการใช้งาน Geoman บน layer เดิมเพื่อป้องกันจุดยอดค้าง (orphaned helper markers)
+    markersGroup.eachLayer(layer => {
+        if (layer.pm && typeof layer.pm.disable === 'function') {
+            layer.pm.disable();
+        }
+        if (typeof layer.eachLayer === 'function') {
+            layer.eachLayer(sub => {
+                if (sub.pm && typeof sub.pm.disable === 'function') {
+                    sub.pm.disable();
+                }
+            });
+        }
+    });
+
     markersGroup.clearLayers();
     const filtered = getFilteredJobs();
     const group = L.featureGroup();
@@ -764,8 +1104,30 @@ function renderMap(fitBounds = false) {
         let layer;
         let color = job.status === 'done' ? '#10b981' : (job.status === 'navigating' ? '#f97316' : '#ef4444');
         let fill = job.status === 'done' ? 0.4 : 0.2;
-        if (viewMode === 'original' && job.geometry && (job.geometry.type.includes('Polygon'))) {
-            layer = L.geoJSON(job.geometry, { style: { color: color, weight: 2, fillOpacity: fill, className: job.status === 'navigating' ? 'job-navigating-pulse' : '' } });
+        if (viewMode === 'original' && job.geometry) {
+            if (job.geometry.type.includes('Polygon')) {
+                layer = L.geoJSON(job.geometry, { style: { color: color, weight: 2, fillOpacity: fill, className: job.status === 'navigating' ? 'job-navigating-pulse' : '' } });
+            } else if (job.properties && job.properties.is_circle && job.properties.radius) {
+                layer = L.circle([job.lat, job.lng], {
+                    radius: job.properties.radius,
+                    color: color,
+                    weight: 2,
+                    fillOpacity: fill,
+                    className: job.status === 'navigating' ? 'job-navigating-pulse' : ''
+                });
+            } else {
+                let iconUrl = job.status === 'done'
+                    ? 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png'
+                    : 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png';
+                let mClassName = '';
+                if (job.status === 'navigating') {
+                    iconUrl = 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-orange.png';
+                    mClassName = 'job-navigating-pulse';
+                }
+                layer = L.marker([job.lat, job.lng], {
+                    icon: L.icon({ iconUrl, iconSize: [25, 41], iconAnchor: [12, 41], className: mClassName })
+                });
+            }
         } else {
             let iconUrl = job.status === 'done'
                 ? 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png'
@@ -781,6 +1143,14 @@ function renderMap(fitBounds = false) {
         }
         if (layer) {
             layer.jobId = job.id;
+            // คัดลอก jobId ไปยัง sublayers หากเป็น LayerGroup
+            if (typeof layer.eachLayer === 'function') {
+                layer.eachLayer(sub => {
+                    sub.jobId = job.id;
+                });
+            }
+            // ผูกเหตุการณ์การวาด/แก้ไขย้ายสำหรับ Geoman
+            bindGeomanEvents(layer, job.id);
             if (isNavigating && job.id !== selectedJobId) {
                 layer.on('add', () => {
                     if (typeof layer.getElement === 'function') {
@@ -965,9 +1335,11 @@ async function stopNav() {
 function openSheet(job) {
     if (isMapClickBlocked) return;
     if (justDeletedJobId && job.id === justDeletedJobId) return;
-    selectedImagesToDelete = [];
-    updateDeleteSelectedButton();
+
     selectedJobId = job.id;
+    window.imagesToDeleteFromCloud = [];
+    window.originalImagesBackup = job.properties.images ? JSON.parse(JSON.stringify(job.properties.images)) : [];
+
     const p = job.properties;
     document.getElementById('sheet-title').innerText = p.name || 'รายละเอียด';
     document.getElementById('sheet-meta').innerText = `${p.amphoe || p.AMPH_NAME || '-'} / ${p.tambon || p.TUMB_NAME || '-'}`;
@@ -1009,10 +1381,21 @@ function openSheet(job) {
         // Not locked by others
         if (navWarning) navWarning.classList.add('hidden');
 
-        // Hide delete button if it's not done (i.e. waiting/navigating)
+        // Hide delete button if it's not done (i.e. waiting/navigating) and not custom draw (custom draw is always status=done but deletable)
         if (btnDelete) {
-            if (isDone) btnDelete.classList.remove('hidden');
-            else btnDelete.classList.add('hidden');
+            if (isDone || (p && p.is_custom_draw)) {
+                btnDelete.classList.remove('hidden');
+                // Customize label and styling for custom draw
+                if (p && p.is_custom_draw) {
+                    btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ลบข้อมูลรูปแปลง/หมุด';
+                    btnDelete.className = 'w-full bg-red-600 text-white py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2 hover:bg-red-700 transition duration-200';
+                } else {
+                    btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ลบรายการนี้';
+                    btnDelete.className = 'w-full bg-red-50 text-red-500 py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2';
+                }
+            } else {
+                btnDelete.classList.add('hidden');
+            }
         }
 
         if (isDone) {
@@ -1041,10 +1424,10 @@ function openSheet(job) {
     }
 
     document.getElementById('fab-container').classList.add('sheet-open');
+    document.getElementById('map').classList.add('sheet-open');
     const sheet = document.getElementById('sheet');
     sheet.classList.remove('minimized');
     sheet.classList.add('active');
-    // ✅ รีเซ็ต transform: ใช้ CSS จัดการ (transform: translateY(0) จาก .active)
     sheet.style.transform = '';
 
     if (!isNavigating) map.flyTo([job.lat, job.lng], 16);
@@ -1097,7 +1480,17 @@ function openSheetSilently(job) {
         renderImageGallery(p.images || [], false);
     } else {
         if (navWarning) navWarning.classList.add('hidden');
-        if (btnDelete) btnDelete.classList.remove('hidden');
+
+        if (btnDelete) {
+            btnDelete.classList.remove('hidden');
+            if (p && p.is_custom_draw) {
+                btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ลบข้อมูลรูปแปลง/หมุด';
+                btnDelete.className = 'w-full bg-red-600 text-white py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2 hover:bg-red-700 transition duration-200';
+            } else {
+                btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ลบรายการนี้';
+                btnDelete.className = 'w-full bg-red-50 text-red-500 py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2';
+            }
+        }
 
         if (isDone) {
             btnSave.classList.add('hidden');
@@ -1126,14 +1519,14 @@ function openSheetSilently(job) {
 }
 
 function enableEdit() {
-    selectedImagesToDelete = [];
-    updateDeleteSelectedButton();
     toggleInputs(true);
     document.getElementById('btn-save').classList.remove('hidden');
     document.getElementById('btn-edit').classList.add('hidden');
 
     const job = dbJobs.find(j => j.id === selectedJobId);
     if (job) {
+        window.imagesToDeleteFromCloud = [];
+        window.originalImagesBackup = job.properties.images ? JSON.parse(JSON.stringify(job.properties.images)) : [];
         const images = job.properties.images || [];
         renderImageGallery(images, true);
     }
@@ -1141,14 +1534,35 @@ function enableEdit() {
 
 function closeSheet(e) {
     if (e) e.stopPropagation();
+
+    if (selectedJobId) {
+        const job = dbJobs.find(j => j.id === selectedJobId);
+        if (job) {
+            const btnSave = document.getElementById('btn-save');
+            const isEditing = btnSave && !btnSave.classList.contains('hidden');
+            if (isEditing && window.originalImagesBackup) {
+                if (job.properties.images) {
+                    job.properties.images.forEach(img => {
+                        if (img && img.isTemp && img.url && img.url.startsWith('blob:')) {
+                            URL.revokeObjectURL(img.url);
+                        }
+                    });
+                }
+                job.properties.images = JSON.parse(JSON.stringify(window.originalImagesBackup));
+            }
+        }
+    }
+
     document.getElementById('sheet').classList.remove('active');
     document.getElementById('sheet').classList.remove('minimized');
     document.getElementById('fab-container').classList.remove('sheet-open');
+    document.getElementById('map').classList.remove('sheet-open');
     if (isNavigating) stopNav();
     selectedJobId = null;
-    selectedImagesToDelete = [];
-    updateDeleteSelectedButton();
+    window.imagesToDeleteFromCloud = [];
+    window.originalImagesBackup = [];
 }
+
 
 function toggleSheetSize() {
     document.getElementById('sheet').classList.toggle('minimized');
@@ -1414,11 +1828,11 @@ function showFieldMapping(feats, onConfirm) {
     });
 
     // Show modal
-    document.getElementById('import-mapping-modal').classList.remove('hidden');
+    document.getElementById('import-mapping-modal').classList.add('active');
 }
 
 function closeImportMappingModal() {
-    document.getElementById('import-mapping-modal').classList.add('hidden');
+    document.getElementById('import-mapping-modal').classList.remove('active');
     tempImportFeatures = [];
     onConfirmImportCallback = null;
 }
@@ -1452,7 +1866,7 @@ if (document.getElementById('btn-confirm-import')) {
             localStorage.setItem('survey_cats_v16', JSON.stringify(categories));
         }
 
-        document.getElementById('import-mapping-modal').classList.add('hidden');
+        document.getElementById('import-mapping-modal').classList.remove('active');
 
         if (onConfirmImportCallback) {
             await onConfirmImportCallback({
@@ -1632,6 +2046,18 @@ async function saveData() {
             }
         }
 
+        // --- ส่วนที่ 1.5: ลบรูปภาพที่ผู้ใช้สั่งลบออกจาก Cloudinary ---
+        if (window.imagesToDeleteFromCloud && window.imagesToDeleteFromCloud.length > 0) {
+            await Promise.all(window.imagesToDeleteFromCloud.map(async (publicId) => {
+                try {
+                    await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
+                } catch (err) {
+                    console.error("ลบภาพจากคลาวด์ไม่สำเร็จ:", publicId, err);
+                }
+            }));
+            window.imagesToDeleteFromCloud = []; // เคลียร์คิวการลบ
+        }
+
         // --- ส่วนที่ 2: บันทึกข้อมูลข้อความลงฐานข้อมูล Supabase ---
         job.status = 'done';
         job.properties.name = document.getElementById('sheet-name').value;
@@ -1656,6 +2082,67 @@ async function saveData() {
 async function deleteJob() {
     const job = dbJobs.find(x => x.id === selectedJobId);
     if (!job) return;
+
+    // Check if custom drawn item
+    if (job.properties && job.properties.is_custom_draw === true) {
+        const hasImages = job.properties.images && job.properties.images.length > 0;
+        const confirm = await Swal.fire({
+            title: 'ยืนยันลบข้อมูลรูปแปลง/หมุด?',
+            text: 'ระบบจะลบข้อมูลรูปแปลง/หมุด และรูปถ่ายทั้งหมดออกจากระบบอย่างถาวร',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            confirmButtonText: 'ยืนยันการลบถาวร',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (confirm.isConfirmed) {
+            justDeletedJobId = job.id;
+            selectedJobId = null;
+            isMapClickBlocked = true;
+            closeSheet();
+
+            showLoading(true, 'กำลังลบข้อมูลรูปแปลง/หมุด...');
+            try {
+                // 1. Delete images from Cloudinary
+                if (hasImages) {
+                    await Promise.all(job.properties.images.map(async (img) => {
+                        const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
+                        if (publicId) {
+                            try {
+                                await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
+                            } catch (err) {
+                                console.error("ลบ Cloudinary พลาด:", err);
+                            }
+                        }
+                    }));
+                }
+
+                // 2. Delete row from Supabase
+                await deleteJobFromSupabase(job.id);
+
+                // 3. Remove from dbJobs
+                const jobIndex = dbJobs.findIndex(j => j.id === job.id);
+                if (jobIndex !== -1) {
+                    dbJobs.splice(jobIndex, 1);
+                }
+
+                // 4. Render map
+                renderMap();
+                showLoading(false);
+                await Swal.fire({ toast: true, icon: 'success', title: 'ลบข้อมูลรูปแปลง/หมุดเรียบร้อยแล้ว', timer: 1500, showConfirmButton: false });
+            } catch (e) {
+                showLoading(false);
+                Swal.fire('ล้มเหลวในการลบข้อมูล', e.message, 'error');
+            } finally {
+                setTimeout(() => {
+                    justDeletedJobId = null;
+                    isMapClickBlocked = false;
+                }, 2000);
+            }
+        }
+        return;
+    }
 
     if (job.status === 'done') {
         const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
@@ -1711,9 +2198,7 @@ async function deleteJob() {
                         const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
                         if (publicId) {
                             try {
-                                const res = await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId));
-                                const data = await res.json();
-                                console.log("Cloudinary response:", data);
+                                await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
                             } catch (err) {
                                 console.error("ลบ Cloudinary พลาด:", err);
                             }
@@ -2091,7 +2576,7 @@ async function importFromCloudLink() {
                 const urlObj = new URL(url);
                 const pathParts = urlObj.pathname.split('/');
                 cleanSource = pathParts[pathParts.length - 1] || 'dropbox';
-            } catch (e) {}
+            } catch (e) { }
             cleanSource = cleanSource.replace(/[^a-zA-Z0-9_\u0e00-\u0e7f]/g, '_') || 'dropbox';
 
             for (let f of feats) {
@@ -2262,7 +2747,7 @@ function renderImportedMapsList() {
                 displayName = 'Link: ' + displayName.substring(0, 30) + '...';
             }
         }
-        
+
         const escapedSource = group.source.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const escapedCategory = group.category.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
@@ -2336,12 +2821,8 @@ async function deleteImportedMap(source, category) {
 
         if (imagesToDelete.length > 0) {
             imagesToDelete.forEach(publicId => {
-                fetch(GAS_URL, {
-                    method: 'POST',
-                    mode: 'no-cors',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `action=delete&public_id=${encodeURIComponent(publicId)}`
-                }).catch(err => console.error("Cloudinary deletion failed on background:", err));
+                fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' })
+                    .catch(err => console.error("Cloudinary deletion failed on background:", err));
             });
         }
 
@@ -2426,11 +2907,11 @@ function openExportCalendarModal(mode) {
     if (actionContainer) actionContainer.classList.add('hidden');
 
     renderExportCalendar();
-    document.getElementById('export-calendar-modal').classList.remove('hidden');
+    document.getElementById('export-calendar-modal').classList.add('active');
 }
 
 function closeExportCalendarModal() {
-    document.getElementById('export-calendar-modal').classList.add('hidden');
+    document.getElementById('export-calendar-modal').classList.remove('active');
     openToolsMenu();
 }
 
@@ -2464,7 +2945,7 @@ function renderExportCalendar() {
 
     // Render empty cells for leading blank days
     for (let i = 0; i < firstDay; i++) {
-        grid.innerHTML += `<div class="p-2"></div>`;
+        grid.innerHTML += `<div class="cal-day cal-day-empty"></div>`;
     }
 
     // Render days of the month
@@ -2473,18 +2954,17 @@ function renderExportCalendar() {
         const hasData = datesWithData.has(dateStr);
         const isSelected = calSelectedDate === dateStr;
 
-        let classes = "p-2 rounded-xl text-center transition select-none ";
+        let classes = "cal-day ";
         let onClickAttr = "";
 
         if (isSelected) {
-            classes += "bg-blue-600 text-white font-bold cursor-pointer shadow-md";
+            classes += "cal-day-selected";
             onClickAttr = `onclick="selectExportDate('${dateStr}')"`;
         } else if (hasData) {
-            // Highlight with data
-            classes += "bg-emerald-100 text-emerald-800 font-bold hover:bg-emerald-200 cursor-pointer border border-emerald-300 shadow-sm";
+            classes += "cal-day-has-data";
             onClickAttr = `onclick="selectExportDate('${dateStr}')"`;
         } else {
-            classes += "text-gray-300 pointer-events-none";
+            classes += "cal-day-disabled";
         }
 
         grid.innerHTML += `<div class="${classes}" ${onClickAttr}>${day}</div>`;
@@ -2954,59 +3434,58 @@ function renderImageGallery(images, editable) {
         if (!url) return;
 
         const card = document.createElement('div');
-        card.className = 'relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-gray-200 shadow-sm cursor-pointer group bg-gray-100 transition duration-200';
+        card.className = 'relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-gray-200 shadow-sm cursor-pointer bg-gray-100 transition duration-200';
 
         const imgEl = document.createElement('img');
         imgEl.src = url;
         imgEl.className = 'w-full h-full object-cover';
         card.appendChild(imgEl);
 
+        const handleView = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            viewFullScreenImage(images, idx);
+        };
+        card.addEventListener('click', handleView);
+        card.addEventListener('touchend', handleView);
+
         if (editable) {
-            // โหมดแก้ไข: คลิกที่รูป/การ์ด เพื่อเลือก/ยกเลิกการเลือกรูปภาพ
-            const isSelected = selectedImagesToDelete.includes(url);
-            if (isSelected) {
-                card.classList.add('ring-2', 'ring-red-500');
-            }
+            const deleteBtn = document.createElement('div');
+            deleteBtn.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center shadow hover:bg-red-600 transition transform hover:scale-110';
+            deleteBtn.innerHTML = '<i class="fa-solid fa-xmark text-[10px]"></i>';
 
-            // แสดงวงกลมติ๊กถูกที่มุมขวาบน
-            const badge = document.createElement('div');
-            badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition';
-            if (isSelected) {
-                badge.className += ' bg-red-500 border-red-500 text-white';
-                badge.innerHTML = '<i class="fa-solid fa-check text-[10px]"></i>';
-            } else {
-                badge.className += ' bg-white/80 border-gray-300 text-transparent';
-                badge.innerHTML = '<i class="fa-solid fa-check text-[10px]"></i>';
-            }
-            card.appendChild(badge);
-
-            const toggleSelect = (e) => {
+            const handleDelete = (e) => {
                 e.stopPropagation();
                 e.preventDefault();
-                const nowSelected = selectedImagesToDelete.includes(url);
-                if (!nowSelected) {
-                    selectedImagesToDelete.push(url);
-                    card.classList.add('ring-2', 'ring-red-500');
-                    badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition bg-red-500 border-red-500 text-white';
-                } else {
-                    selectedImagesToDelete = selectedImagesToDelete.filter(x => x !== url);
-                    card.classList.remove('ring-2', 'ring-red-500');
-                    badge.className = 'absolute top-1 right-1 z-20 w-5 h-5 rounded-full flex items-center justify-center border shadow-sm transition bg-white/80 border-gray-300 text-transparent';
+
+                const job = dbJobs.find(j => j.id === selectedJobId);
+                if (!job || !job.properties.images) return;
+
+                const imageToDel = job.properties.images[idx];
+                if (imageToDel) {
+                    if (imageToDel.isTemp) {
+                        if (imageToDel.url && imageToDel.url.startsWith('blob:')) {
+                            URL.revokeObjectURL(imageToDel.url);
+                        }
+                    } else {
+                        const publicId = imageToDel.public_id || getPublicIdFromUrl(typeof imageToDel === 'string' ? imageToDel : imageToDel.url);
+                        if (publicId) {
+                            window.imagesToDeleteFromCloud.push(publicId);
+                        }
+                    }
+                    job.properties.images.splice(idx, 1);
+
+                    toggleInputs(true);
+                    document.getElementById('btn-save').classList.remove('hidden');
+                    document.getElementById('btn-edit').classList.add('hidden');
+
+                    renderImageGallery(job.properties.images, true);
                 }
-                updateDeleteSelectedButton();
             };
 
-            card.addEventListener('click', toggleSelect);
-            card.addEventListener('touchend', toggleSelect);
-        } else {
-            // โหมดปกติ: คลิกเพื่อเปิดขยายดูรูปแบบเต็มหน้าจอ
-            const handleView = (e) => {
-                e.stopPropagation();
-                e.preventDefault();
-                viewFullScreenImage(images, idx);
-            };
-            card.addEventListener('click', handleView);
-            card.addEventListener('touchend', handleView);
+            deleteBtn.addEventListener('click', handleDelete);
+            deleteBtn.addEventListener('touchend', handleDelete);
+            card.appendChild(deleteBtn);
         }
 
         container.appendChild(card);
@@ -3082,6 +3561,47 @@ function showGallerySwal() {
 function prevGalleryImage() { if (currentGalleryIndex > 0) { currentGalleryIndex--; showGallerySwal(); } }
 function nextGalleryImage() { if (currentGalleryIndex < currentGalleryImages.length - 1) { currentGalleryIndex++; showGallerySwal(); } }
 
+function compressImage(file, targetWidth = 800, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+
+                // ย่อขนาดโดยคงสัดส่วนเดิม (Maintain aspect ratio)
+                if (width > targetWidth) {
+                    height = Math.round((height * targetWidth) / width);
+                    width = targetWidth;
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        const compressedFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", {
+                            type: 'image/jpeg',
+                            lastModified: Date.now()
+                        });
+                        resolve(compressedFile);
+                    } else {
+                        reject(new Error("Canvas toBlob failed"));
+                    }
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = (err) => reject(err);
+        };
+        reader.onerror = (err) => reject(err);
+    });
+}
+
 function triggerCamera() {
     const job = dbJobs.find(j => j.id === selectedJobId);
     if (!job) return;
@@ -3111,24 +3631,43 @@ async function handleImageUpload(event) {
 
     const originalInput = document.getElementById('camera-file-input');
 
-    for (let file of files) {
-        if (job.properties.images.length >= 6) {
-            Swal.fire('ข้อจำกัด', 'สามารถอัปโหลดได้สูงสุด 6 รูปเท่านั้น', 'warning');
-            break;
+    Swal.fire({
+        title: 'กำลังบีบอัดรูปภาพ...',
+        text: 'กรุณารอสักครู่',
+        allowOutsideClick: false,
+        didOpen: () => {
+            Swal.showLoading();
         }
+    });
 
-        // 1. สร้าง URL ชั่วคราวเพื่อแสดงพรีวิวภาพบนหน้าจอทันที
-        const tempUrl = URL.createObjectURL(file);
+    try {
+        for (let file of files) {
+            if (job.properties.images.length >= 6) {
+                Swal.fire('ข้อจำกัด', 'สามารถอัปโหลดได้สูงสุด 6 รูปเท่านั้น', 'warning');
+                break;
+            }
 
-        // 2. เก็บไฟล์จริงไว้ใน Array โดยมีตัวแปร isTemp: true รอส่งไป Cloudinary
-        job.properties.images.push({
-            url: tempUrl,
-            isTemp: true,
-            file: file
-        });
+            // บีบอัดภาพด้วย Canvas เป็นขนาดกว้าง 800px
+            const compressedFile = await compressImage(file, 800, 0.75);
+            const tempUrl = URL.createObjectURL(compressedFile);
+
+            job.properties.images.push({
+                url: tempUrl,
+                isTemp: true,
+                file: compressedFile
+            });
+        }
+        Swal.close();
+
+        // เมื่อเพิ่มภาพ ให้เปลี่ยนสถานะแถบข้อมูลเป็นโหมดแก้ไข (แสดงปุ่มบันทึก)
+        toggleInputs(true);
+        document.getElementById('btn-save').classList.remove('hidden');
+        document.getElementById('btn-edit').classList.add('hidden');
+    } catch (err) {
+        console.error("Compression error:", err);
+        Swal.fire('เกิดข้อผิดพลาด', 'ไม่สามารถบีบอัดรูปภาพได้: ' + err.message, 'error');
     }
 
-    // อัปเดตแกลเลอรีภาพบนหน้าจอ (รูปจะโชว์ขึ้นมาทันที)
     renderImageGallery(job.properties.images, true);
     originalInput.value = '';
 }
@@ -3152,143 +3691,7 @@ function showGalleryUploadingPlaceholder() {
     container.appendChild(card);
 }
 
-async function deleteJobImage(idx) {
-    const job = dbJobs.find(j => j.id === selectedJobId);
-    if (!job || !job.properties.images || !job.properties.images[idx]) return;
 
-    const img = job.properties.images[idx];
-
-    const result = await Swal.fire({
-        title: 'ยืนยันลบรูปถ่าย?',
-        text: 'รูปนี้จะถูกลบออก',
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        confirmButtonText: 'ลบรูป',
-        cancelButtonText: 'ยกเลิก'
-    });
-
-    if (result.isConfirmed) {
-        showLoading(true, 'กำลังลบรูปภาพ...');
-        try {
-            // กรณีที่ 1: เป็นรูปพรีวิว (ผู้ใช้เพิ่งเลือก แต่ยังไม่ได้กดเซฟ) 
-            // -> ลบจากหน้าจอได้เลย ไม่ต้องวิ่งไปกวนหลังบ้าน
-            if (img.isTemp) {
-                if (img.url && img.url.startsWith('blob:')) {
-                    URL.revokeObjectURL(img.url); // คืนพื้นที่หน่วยความจำให้มือถือ
-                }
-                job.properties.images.splice(idx, 1);
-                renderImageGallery(job.properties.images, true);
-                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปพรีวิวทิ้งแล้ว', timer: 1000, showConfirmButton: false });
-            }
-            // กรณีที่ 2: เป็นรูปที่อัปโหลดขึ้น Cloudinary ไปแล้ว (มี public_id หรือแกะจาก URL ได้)
-            else {
-                const publicId = img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url);
-                if (publicId) {
-                    // ใช้ mode: 'no-cors' เพื่อป้องกัน CORS redirection error จาก Google Apps Script
-                    await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
-                }
-
-                // ลบรูปภาพออกจากรายการและบันทึกข้อมูล
-                job.properties.images.splice(idx, 1);
-                await saveJobToSupabase(job);
-                renderImageGallery(job.properties.images, true);
-
-                // รีเซ็ตการเลือกถ้ามีรูปที่เลือกถูกลบออกไปเดี่ยวๆ
-                selectedImagesToDelete = selectedImagesToDelete.filter(x => x !== (typeof img === 'string' ? img : img.url));
-                updateDeleteSelectedButton();
-
-                Swal.fire({ toast: true, icon: 'success', title: 'ลบรูปภาพสำเร็จ', timer: 1500, showConfirmButton: false });
-            }
-        } catch (e) {
-            console.error("ระบบลบภาพล้มเหลว", e);
-            Swal.fire('ล้มเหลว', e.message, 'error');
-        } finally {
-            showLoading(false);
-        }
-    }
-}
-
-function updateDeleteSelectedButton() {
-    const btn = document.getElementById('btn-delete-selected');
-    const countEl = document.getElementById('delete-selected-count');
-    if (!btn || !countEl) return;
-
-    if (selectedImagesToDelete.length > 0) {
-        countEl.textContent = selectedImagesToDelete.length;
-        btn.classList.remove('hidden');
-    } else {
-        btn.classList.add('hidden');
-    }
-}
-
-async function deleteSelectedImages() {
-    const job = dbJobs.find(j => j.id === selectedJobId);
-    if (!job || !job.properties.images || selectedImagesToDelete.length === 0) return;
-
-    const count = selectedImagesToDelete.length;
-    const result = await Swal.fire({
-        title: `ยืนยันลบรูปถ่ายที่เลือก?`,
-        text: `รูปที่เลือกจำนวน ${count} รูปจะถูกลบออกอย่างถาวร`,
-        icon: 'warning',
-        showCancelButton: true,
-        confirmButtonColor: '#ef4444',
-        confirmButtonText: 'ลบรูปภาพที่เลือก',
-        cancelButtonText: 'ยกเลิก'
-    });
-
-    if (result.isConfirmed) {
-        showLoading(true, 'กำลังลบรูปภาพที่เลือก...');
-        try {
-            const imagesToProcess = [...job.properties.images];
-            const remainingImages = [];
-            const urlsToDeleteFromCloud = [];
-
-            for (let img of imagesToProcess) {
-                const url = typeof img === 'string' ? img : img.url;
-                if (selectedImagesToDelete.includes(url)) {
-                    if (img.isTemp) {
-                        if (img.url && img.url.startsWith('blob:')) {
-                            URL.revokeObjectURL(img.url);
-                        }
-                    } else {
-                        const publicId = img.public_id || getPublicIdFromUrl(url);
-                        if (publicId) {
-                            urlsToDeleteFromCloud.push(publicId);
-                        }
-                    }
-                } else {
-                    remainingImages.push(img);
-                }
-            }
-
-            // ส่งคำขอลบไปยัง Cloudinary ผ่าน GAS ด้วย GET + no-cors
-            if (urlsToDeleteFromCloud.length > 0) {
-                await Promise.all(urlsToDeleteFromCloud.map(async (publicId) => {
-                    try {
-                        await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
-                    } catch (err) {
-                        console.error("ลบภาพจากคลาวด์ไม่สำเร็จ:", publicId, err);
-                    }
-                }));
-            }
-
-            job.properties.images = remainingImages;
-            await saveJobToSupabase(job);
-
-            selectedImagesToDelete = [];
-            updateDeleteSelectedButton();
-            renderImageGallery(job.properties.images, true);
-
-            Swal.fire({ toast: true, icon: 'success', title: `ลบรูปภาพที่เลือกเรียบร้อยแล้ว`, timer: 1500, showConfirmButton: false });
-        } catch (e) {
-            console.error("ระบบลบภาพล้มเหลว", e);
-            Swal.fire('ล้มเหลว', e.message, 'error');
-        } finally {
-            showLoading(false);
-        }
-    }
-}
 
 // Export handlers to window for inline HTML event listener compatibility
 window.handleAuthSubmit = handleAuthSubmit;
@@ -3328,8 +3731,6 @@ window.navigateExportCalendar = navigateExportCalendar;
 window.selectExportDate = selectExportDate;
 window.confirmExportCalendar = confirmExportCalendar;
 window.closeImportMappingModal = closeImportMappingModal;
-window.deleteJobImage = deleteJobImage;
-window.deleteSelectedImages = deleteSelectedImages;
 window.viewFullScreenImage = viewFullScreenImage;
 window.prevGalleryImage = prevGalleryImage;
 window.nextGalleryImage = nextGalleryImage;

@@ -44,6 +44,9 @@
 
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Leaflet Geoman for Drawing -->
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
     <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
     <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -55,6 +58,10 @@
         :root {
             --safe-top: env(safe-area-inset-top);
             --safe-bottom: env(safe-area-inset-bottom);
+        }
+
+        .hidden {
+            display: none !important;
         }
 
         /* Auth Glassmorphism Design */
@@ -308,9 +315,18 @@
 
         .top-row {
             display: flex;
+            align-items: center;
+            justify-content: space-between;
             gap: 8px;
             pointer-events: auto;
             margin-bottom: 8px;
+            padding: 0 4px;
+        }
+
+        .control-btn-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .control-btn {
@@ -608,6 +624,228 @@
                 box-shadow: 0 0 0 0 rgba(249, 115, 22, 0);
             }
         }
+
+        /* Custom Premium Calendar Modals & Forms */
+        .calendar-weekdays {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            text-align: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: #94a3b8;
+            margin-bottom: 8px;
+        }
+
+        .calendar-days {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 6px;
+            text-align: center;
+            font-size: 12px;
+        }
+
+        .cal-day {
+            padding: 8px 0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .cal-day:hover {
+            background-color: #f1f5f9;
+        }
+
+        .cal-day-selected {
+            background-color: #2563eb !important;
+            color: white !important;
+            font-weight: bold;
+            box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3);
+        }
+
+        .cal-day-has-data {
+            background-color: #dbeafe;
+            color: #1e40af;
+            font-weight: 600;
+        }
+
+        .cal-day-has-data:hover {
+            background-color: #bfdbfe;
+        }
+
+        .cal-day-empty {
+            pointer-events: none;
+            background: transparent;
+        }
+
+        .cal-day-disabled {
+            color: #cbd5e1;
+            pointer-events: none;
+            background: transparent;
+        }
+
+        .modal-body-scroll {
+            max-height: 45vh;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .modal-body-scroll::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .modal-body-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+
+        .modal-field-group {
+            margin-bottom: 12px;
+        }
+
+        .modal-label {
+            display: block;
+            font-size: 10px;
+            font-weight: bold;
+            color: #64748b;
+            margin-bottom: 4px;
+        }
+
+        .modal-select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            background-color: white;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .modal-select:focus {
+            border-color: #2563eb;
+        }
+
+        .modal-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 12px;
+            background-color: white;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .modal-input:focus {
+            border-color: #2563eb;
+        }
+
+        .modal-btn-primary {
+            background-color: #2563eb;
+            color: white;
+            padding: 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-btn-primary:hover {
+            background-color: #1d4ed8;
+        }
+
+        .modal-btn-primary:active {
+            transform: scale(0.95);
+        }
+
+        .modal-btn-secondary {
+            background-color: #f1f5f9;
+            color: #475569;
+            padding: 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            border: 1px solid #e2e8f0;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-btn-secondary:hover {
+            background-color: #e2e8f0;
+        }
+
+        .modal-btn-secondary:active {
+            transform: scale(0.95);
+        }
+
+        .modal-grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        /* จัดสไตล์และตำแหน่งแถบเครื่องมือ Geoman ให้อยู่ด้านขวา เหนือปุ่ม FAB */
+        /* จัดตำแหน่งของ Leaflet Right Container ที่เก็บแถบเครื่องมือ Geoman ทั้งหมด */
+        .leaflet-bottom.leaflet-right {
+            position: absolute !important;
+            right: 10px !important;
+            bottom: calc(230px + var(--safe-bottom)) !important;
+            top: auto !important;
+            z-index: 890 !important;
+            display: flex !important;
+            flex-direction: row !important;
+            gap: 8px !important;
+        }
+
+        /* คลาสสำหรับซ่อนแถบเครื่องมือ Geoman เมื่อถูกยุบเก็บ */
+        .leaflet-bottom.leaflet-right.pm-hidden {
+            display: none !important;
+        }
+
+        /* เมื่อมีคลาส sheet-open (Bottom Sheet เปิดอยู่) ดันขึ้นไปอีก */
+        #map.sheet-open .leaflet-bottom.leaflet-right {
+            bottom: calc(370px + var(--safe-bottom)) !important;
+        }
+
+        /* สไตล์ของแต่ละแถบเครื่องมือ (Draw and Edit) ให้แสดงผลกลมกลืน */
+        .leaflet-right .leaflet-pm-toolbar {
+            position: relative !important;
+            margin: 0 !important;
+            border: none !important;
+            box-shadow: none !important;
+            background: transparent !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+        }
+
+        /* ปรับลักษณะปุ่มเครื่องมือให้กลมสวยงาม */
+        .leaflet-right .leaflet-pm-toolbar .leaflet-buttons-control-button {
+            border-radius: 50% !important;
+            width: 48px !important;
+            height: 48px !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+            background-color: white !important;
+            border: none !important;
+            display: flex !important;
+            justify-content: center !important;
+            align-items: center !important;
+            transition: all 0.2s !important;
+        }
+
+        .leaflet-right .leaflet-pm-toolbar .leaflet-buttons-control-button:active {
+            transform: scale(0.95) !important;
+        }
     </style>
 </head>
 
@@ -619,27 +857,27 @@
     </div>
 
     <div id="top-bar">
-        <div class="top-row justify-between items-center px-1 mb-2">
+        <div class="top-row px-1 mb-2">
             <div id="status-bar" onclick="openToolsMenu()">
-                <i class="fa-solid fa-user-gear text-blue-600"></i>
+                <i class="fa-solid fa-user-gear" style="color: #2563eb;"></i>
                 <span id="user-display">ตั้งค่า</span>
                 <span id="job-counter">0/0</span>
             </div>
 
-            <div class="flex gap-1.5">
-                <button class="control-btn text-blue-600" onclick="togglePinLabels()" id="btn-label"
+            <div class="control-btn-group">
+                <button class="control-btn" style="color: #2563eb;" onclick="togglePinLabels()" id="btn-label"
                     title="แสดง/ซ่อน ป้ายชื่อหมุด">
                     <i class="fa-solid fa-tags"></i>
                 </button>
-                <button class="control-btn text-green-600" onclick="syncJobsFromDB()" id="btn-reload"
+                <button class="control-btn" style="color: #16a34a;" onclick="syncJobsFromDB()" id="btn-reload"
                     title="รีโหลดข้อมูลจากเซิร์ฟเวอร์">
                     <i class="fa-solid fa-rotate"></i>
                 </button>
-                <button class="control-btn text-purple-600" onclick="toggleViewMode()" id="btn-view"
+                <button class="control-btn" style="color: #9333ea;" onclick="toggleViewMode()" id="btn-view"
                     title="สลับโหมดหมุด/ขอบเขตแปลง">
                     <i class="fa-solid fa-draw-polygon"></i>
                 </button>
-                <button class="control-btn text-gray-700" onclick="toggleBaseMap()" title="เปลี่ยนแผนที่ฐาน">
+                <button class="control-btn" style="color: #374151;" onclick="toggleBaseMap()" title="เปลี่ยนแผนที่ฐาน">
                     <i class="fa-solid fa-layer-group"></i>
                 </button>
             </div>
@@ -663,6 +901,9 @@
     <div id="map" class="map-full"></div>
 
     <div id="fab-container" class="fab-col">
+        <button id="btn-toggle-pm" class="btn-fab bg-purple-600 text-white" onclick="toggleGeomanToolbar()" title="เปิด/ปิดเครื่องมือวาดและย้ายรูปแปลง">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
         <button class="btn-fab bg-gray-800 text-white" onclick="openToolsMenu()"><i
                 class="fa-solid fa-gear"></i></button>
         <button class="btn-fab bg-blue-500 text-white" onclick="findNearestNewJob()"><i
@@ -745,11 +986,7 @@
                     <div class="flex justify-between items-center">
                         <label class="text-xs font-bold text-gray-500 ml-1">รูปถ่ายหมุด (ไม่เกิน 6 รูป)</label>
                         <div class="flex gap-2">
-                            <button id="btn-delete-selected" onclick="deleteSelectedImages()"
-                                class="text-xs bg-red-100 text-red-700 px-3 py-1.5 rounded-xl font-bold hover:bg-red-200 transition flex items-center gap-1 hidden">
-                                <i class="fa-solid fa-trash"></i> ลบรูปที่เลือก (<span
-                                    id="delete-selected-count">0</span>)
-                            </button>
+
                             <button id="btn-camera" onclick="triggerCamera()" disabled
                                 class="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded-xl font-bold hover:bg-blue-200 transition flex items-center gap-1">
                                 <i class="fa-solid fa-camera"></i> ถ่ายรูป/อัปโหลด
@@ -1093,171 +1330,168 @@
     </div>
 
     <!-- Export Calendar Modal -->
-    <div id="export-calendar-modal"
-        class="fixed inset-0 bg-black/50 z-[9999] hidden flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 relative">
-            <h3 id="export-calendar-title" class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                <i class="fa-solid fa-calendar-days text-blue-600"></i> เลือกวันที่ต้องการส่งออก
-            </h3>
-
-            <!-- Calendar Navigation -->
-            <div class="flex items-center justify-between">
-                <button onclick="navigateExportCalendar(-1)" class="p-2 hover:bg-gray-100 rounded-full transition">
-                    <i class="fa-solid fa-chevron-left text-xs text-gray-600"></i>
-                </button>
-                <span id="cal-month-year" class="text-xs font-bold text-gray-700">-</span>
-                <button onclick="navigateExportCalendar(1)" class="p-2 hover:bg-gray-100 rounded-full transition">
-                    <i class="fa-solid fa-chevron-right text-xs text-gray-600"></i>
-                </button>
-            </div>
-
-            <!-- Calendar Grid -->
-            <div>
-                <!-- Weekdays -->
-                <div class="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-gray-400 mb-2">
-                    <div>อา</div>
-                    <div>จ</div>
-                    <div>อ</div>
-                    <div>พ</div>
-                    <div>พฤ</div>
-                    <div>ศ</div>
-                    <div>ส</div>
-                </div>
-                <!-- Days grid -->
-                <div id="cal-days-grid" class="grid grid-cols-7 gap-1.5 text-center text-xs">
-                    <!-- Dynamic Days -->
-                </div>
-            </div>
-
-            <!-- Selected Date Action -->
-            <div id="cal-action-container"
-                class="hidden p-3 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-center justify-between">
-                <div>
-                    <div class="text-[9px] font-bold text-blue-500">วันที่เลือก</div>
-                    <div id="cal-selected-display" class="text-xs font-bold text-gray-800">-</div>
-                </div>
-                <button onclick="confirmExportCalendar()"
-                    class="bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-bold hover:bg-blue-700 transition">
-                    ยืนยันเลือกวัน
-                </button>
-            </div>
-
-            <!-- Action Buttons -->
-            <div class="grid grid-cols-2 gap-3 pt-2">
-                <button onclick="confirmExportCalendar(true)"
-                    class="bg-gray-100 text-gray-700 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-200 transition">
-                    ส่งออกทั้งหมด
-                </button>
+    <div id="export-calendar-modal" class="custom-modal" onclick="closeExportCalendarModal()">
+        <div class="custom-modal-content" onclick="event.stopPropagation()">
+            <!-- Modal Header -->
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 id="export-calendar-title" class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                    <i class="fa-solid fa-calendar-days text-blue-600"></i> เลือกวันที่ต้องการส่งออก
+                </h3>
                 <button onclick="closeExportCalendarModal()"
-                    class="border border-gray-200 text-gray-500 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-50 transition">
-                    ยกเลิก
+                    class="w-8 h-8 rounded-full bg-gray-200 text-gray-650 flex items-center justify-center hover:bg-red-100 hover:text-red-500 transition border-none">
+                    <i class="fa-solid fa-times"></i>
                 </button>
+            </div>
+
+            <div class="p-5 space-y-4">
+                <!-- Calendar Navigation -->
+                <div class="flex items-center justify-between">
+                    <button onclick="navigateExportCalendar(-1)" class="p-2 hover:bg-gray-100 rounded-full transition border-none bg-transparent">
+                        <i class="fa-solid fa-chevron-left text-xs text-gray-600"></i>
+                    </button>
+                    <span id="cal-month-year" class="text-xs font-bold text-gray-700">-</span>
+                    <button onclick="navigateExportCalendar(1)" class="p-2 hover:bg-gray-100 rounded-full transition border-none bg-transparent">
+                        <i class="fa-solid fa-chevron-right text-xs text-gray-600"></i>
+                    </button>
+                </div>
+
+                <!-- Calendar Grid -->
+                <div>
+                    <!-- Weekdays -->
+                    <div class="calendar-weekdays">
+                        <div>อา</div>
+                        <div>จ</div>
+                        <div>อ</div>
+                        <div>พ</div>
+                        <div>พฤ</div>
+                        <div>ศ</div>
+                        <div>ส</div>
+                    </div>
+                    <!-- Days grid -->
+                    <div id="cal-days-grid" class="calendar-days">
+                        <!-- Dynamic Days -->
+                    </div>
+                </div>
+
+                <!-- Selected Date Action -->
+                <div id="cal-action-container"
+                    class="hidden p-3 bg-blue-50/50 border border-blue-100 rounded-2xl flex items-center justify-between">
+                    <div>
+                        <div class="text-[9px] font-bold text-blue-500">วันที่เลือก</div>
+                        <div id="cal-selected-display" class="text-xs font-bold text-gray-800">-</div>
+                    </div>
+                    <button onclick="confirmExportCalendar()" class="modal-btn-primary px-4 py-2">
+                        ยืนยันเลือกวัน
+                    </button>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="modal-grid-2">
+                    <button onclick="confirmExportCalendar(true)" class="modal-btn-secondary">
+                        ส่งออกทั้งหมด
+                    </button>
+                    <button onclick="closeExportCalendarModal()" class="modal-btn-secondary">
+                        ยกเลิก
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Import Mapping Modal -->
-    <div id="import-mapping-modal"
-        class="fixed inset-0 bg-black/50 z-[9999] hidden flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 relative">
-            <h3 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
-                <i class="fa-solid fa-map-location-dot text-blue-600"></i> กำหนดการเชื่อมโยงฟิลด์นำเข้า
-            </h3>
-
-            <p class="text-[11px] text-gray-500 leading-relaxed">
-                ระบบตรวจพบข้อมูลคุณสมบัติในแผนที่ กรุณาเลือกฟิลด์ที่จะนำไปใช้แสดงและจัดเก็บในระบบ:
-            </p>
-
-            <div class="space-y-3 max-h-[45vh] overflow-y-auto pr-1">
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">0. ไอดี (แสดง
-                        ชื่อแปลงเลขทะเบียน)</label>
-                    <select id="map-field-id"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">1. เชื่อมโยงช่องค้นหา</label>
-                    <select id="map-field-search"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">2. เชื่อมโยง อำเภอ (Amphoe)
-                        ทั้งหมด</label>
-                    <select id="map-field-amphoe"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">3. เชื่อมโยง ตำบล (Tambon)
-                        ทั้งหมด</label>
-                    <select id="map-field-tambon"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">4. เชื่อมโยง เนื้อที่ (Area)</label>
-                    <select id="map-field-area"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">5. เชื่อมโยง ข้อความสำรวจ
-                        (Note)</label>
-                    <select id="map-field-note"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div>
-                    <label class="text-[10px] font-bold text-gray-500 block mb-1">6. เชื่อมโยง สถานะสำรวจ
-                        (Status)</label>
-                    <select id="map-field-status"
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                        <!-- Options populated dynamically -->
-                    </select>
-                </div>
-
-                <div class="border-t border-gray-150 pt-3 mt-3">
-                    <label class="text-[10px] font-bold text-gray-600 block mb-1">7. ประเภทงาน /
-                        โครงการที่กำลังสำรวจ</label>
-                    <div class="flex gap-2 mb-2">
-                        <select id="import-category-select" onchange="toggleImportCategoryInput()"
-                            class="flex-1 p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500">
-                            <!-- Options populated dynamically -->
-                        </select>
-                        <button type="button" onclick="deleteImportCategory()"
-                            class="px-3 bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 rounded-xl border border-red-200 transition flex items-center justify-center"
-                            title="ลบประเภทงานนี้ออกจากตัวเลือก">
-                            <i class="fa-solid fa-trash-can text-xs"></i>
-                        </button>
-                    </div>
-                    <input type="text" id="import-category-custom" placeholder="หรือพิมพ์ประเภทงานใหม่ที่นี่..."
-                        class="w-full p-2.5 border border-gray-300 rounded-xl bg-white text-xs outline-none focus:border-blue-500 hidden">
-                </div>
+    <div id="import-mapping-modal" class="custom-modal" onclick="closeImportMappingModal()">
+        <div class="custom-modal-content" onclick="event.stopPropagation()">
+            <!-- Modal Header -->
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h3 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                    <i class="fa-solid fa-map-location-dot text-blue-600"></i> กำหนดการเชื่อมโยงฟิลด์นำเข้า
+                </h3>
+                <button onclick="closeImportMappingModal()"
+                    class="w-8 h-8 rounded-full bg-gray-200 text-gray-650 flex items-center justify-center hover:bg-red-100 hover:text-red-500 transition border-none">
+                    <i class="fa-solid fa-times"></i>
+                </button>
             </div>
 
-            <div class="grid grid-cols-2 gap-3 pt-2">
-                <button id="btn-confirm-import"
-                    class="bg-blue-600 text-white py-2.5 rounded-xl text-xs font-bold hover:bg-blue-700 active:scale-95 transition">
-                    ยืนยันนำเข้าข้อมูล
-                </button>
-                <button onclick="closeImportMappingModal()"
-                    class="border border-gray-200 text-gray-500 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-50 transition">
-                    ยกเลิก
-                </button>
+            <div class="p-5 space-y-4">
+                <p class="text-[11px] text-gray-500 leading-relaxed">
+                    ระบบตรวจพบข้อมูลคุณสมบัติในแผนที่ กรุณาเลือกฟิลด์ที่จะนำไปใช้แสดงและจัดเก็บในระบบ:
+                </p>
+
+                <div class="modal-body-scroll space-y-3">
+                    <div class="modal-field-group">
+                        <label class="modal-label">0. ไอดี (แสดง ชื่อแปลงเลขทะเบียน)</label>
+                        <select id="map-field-id" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">1. เชื่อมโยงช่องค้นหา</label>
+                        <select id="map-field-search" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">2. เชื่อมโยง อำเภอ (Amphoe) ทั้งหมด</label>
+                        <select id="map-field-amphoe" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">3. เชื่อมโยง ตำบล (Tambon) ทั้งหมด</label>
+                        <select id="map-field-tambon" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">4. เชื่อมโยง เนื้อที่ (Area)</label>
+                        <select id="map-field-area" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">5. เชื่อมโยง ข้อความสำรวจ (Note)</label>
+                        <select id="map-field-note" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="modal-field-group">
+                        <label class="modal-label">6. เชื่อมโยง สถานะสำรวจ (Status)</label>
+                        <select id="map-field-status" class="modal-select">
+                            <!-- Options populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="border-t border-gray-150 pt-3 mt-3">
+                        <label class="modal-label text-gray-650 mb-1">7. ประเภทงาน / โครงการที่กำลังสำรวจ</label>
+                        <div class="flex gap-2 mb-2">
+                            <select id="import-category-select" onchange="toggleImportCategoryInput()" class="modal-select flex-1">
+                                <!-- Options populated dynamically -->
+                            </select>
+                            <button type="button" onclick="deleteImportCategory()"
+                                class="px-3 bg-red-50 text-red-500 hover:bg-red-100 hover:text-red-700 rounded-xl border border-red-200 transition flex items-center justify-center"
+                                title="ลบประเภทงานนี้ออกจากตัวเลือก">
+                                <i class="fa-solid fa-trash-can text-xs"></i>
+                            </button>
+                        </div>
+                        <input type="text" id="import-category-custom" placeholder="หรือพิมพ์ประเภทงานใหม่ที่นี่..."
+                            class="modal-input hidden">
+                    </div>
+                </div>
+
+                <div class="modal-grid-2 pt-2">
+                    <button id="btn-confirm-import" class="modal-btn-primary">
+                        ยืนยันนำเข้าข้อมูล
+                    </button>
+                    <button onclick="closeImportMappingModal()" class="modal-btn-secondary">
+                        ยกเลิก
+                    </button>
+                </div>
             </div>
         </div>
     </div>
