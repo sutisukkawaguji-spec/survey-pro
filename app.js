@@ -299,6 +299,8 @@ async function syncJobsFromDB() {
 }
 
 async function syncJobsSilently() {
+    const isPmEditing = map && map.pm && (map.pm.globalEditModeEnabled() || map.pm.globalDragModeEnabled() || map.pm.globalRotateModeEnabled() || map.pm.globalDrawModeEnabled());
+    if (window.pendingNewShapes.length > 0 || window.pendingGeomanUpdates.size > 0 || isPmEditing) return;
     if (!supabaseClient || !currentUser || isNavigating || isMapClickBlocked) return;
     try {
         let allJobs = [];
@@ -331,7 +333,7 @@ async function syncJobsSilently() {
         if (data) {
             // ป้องกันการล้างข้อมูลที่กำลังพิมพ์หรือรูปถ่ายพรีวิวที่กำลังเลือกค้างอยู่ขณะซิงค์ในพื้นหลัง (Background Sync)
             if (selectedJobId) {
-                const localJob = dbJobs.find(j => j.id === selectedJobId);
+                const localJob = findJobById(selectedJobId);
                 const dbJobIndex = data.findIndex(j => j.id === selectedJobId);
                 const btnSave = document.getElementById('btn-save');
                 const isEditing = btnSave && !btnSave.classList.contains('hidden');
@@ -366,7 +368,7 @@ async function syncJobsSilently() {
 
             renderMap(false);
             if (selectedJobId) {
-                const currentOpenJob = dbJobs.find(j => j.id === selectedJobId);
+                const currentOpenJob = findJobById(selectedJobId);
                 if (currentOpenJob) {
                     const nameActive = document.activeElement === document.getElementById('sheet-name');
                     const noteActive = document.activeElement === document.getElementById('sheet-note');
@@ -436,6 +438,96 @@ let justDeletedJobId = null;
 window.imagesToDeleteFromCloud = [];
 window.originalImagesBackup = [];
 window.pendingGeomanUpdates = new Map();
+window.pendingNewShapes = [];
+
+// --- Helper functions for hand-drawn shapes and area calculations ---
+
+function findJobById(id) {
+    if (!id) return null;
+    let job = dbJobs.find(j => j.id === id);
+    if (!job && window.pendingNewShapes) {
+        job = window.pendingNewShapes.find(j => j.id === id);
+    }
+    return job;
+}
+window.findJobById = findJobById;
+
+function getFlatCoordinates(layer) {
+    try {
+        const geojson = layer.toGeoJSON();
+        if (geojson && geojson.geometry) {
+            if (geojson.geometry.type === 'Polygon') {
+                return geojson.geometry.coordinates[0];
+            } else if (geojson.geometry.type === 'MultiPolygon') {
+                return geojson.geometry.coordinates[0][0];
+            }
+        }
+    } catch (e) {
+        console.error("Error in getFlatCoordinates", e);
+    }
+    try {
+        if (typeof layer.getLatLngs === 'function') {
+            let latlngs = layer.getLatLngs();
+            if (Array.isArray(latlngs[0])) {
+                latlngs = latlngs[0];
+            }
+            return latlngs.map(ll => [ll.lng, ll.lat]);
+        }
+    } catch (e) {
+        console.error("Fallback getFlatCoordinates failed", e);
+    }
+    return [];
+}
+
+function calculatePolygonAreaInSqm(coords) {
+    if (!coords || coords.length < 3) return 0;
+    
+    let pts = [...coords];
+    const first = pts[0];
+    const last = pts[pts.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) {
+        pts.push(first);
+    }
+    
+    let area = 0;
+    const R = 6378137; // Earth radius in meters
+    
+    for (let i = 0; i < pts.length - 1; i++) {
+        const p1 = pts[i];
+        const p2 = pts[i + 1];
+        
+        const lat1 = p1[1] * Math.PI / 180;
+        const lat2 = p2[1] * Math.PI / 180;
+        const lng1 = p1[0] * Math.PI / 180;
+        const lng2 = p2[0] * Math.PI / 180;
+        
+        area += (lng2 - lng1) * (2 + Math.sin(lat1) + Math.sin(lat2));
+    }
+    
+    area = Math.abs(area * R * R / 2.0);
+    return area;
+}
+
+function calculateCircleAreaInSqm(radius) {
+    return Math.PI * radius * radius;
+}
+
+function formatThaiArea(sqm) {
+    if (!sqm || isNaN(sqm) || sqm <= 0) return '-';
+    const totalSqWa = sqm / 4.0;
+    const rai = Math.floor(totalSqWa / 400);
+    const remainingSqWaAfterRai = totalSqWa % 400;
+    const ngan = Math.floor(remainingSqWaAfterRai / 100);
+    const wa = remainingSqWaAfterRai % 100;
+    
+    let parts = [];
+    if (rai > 0) parts.push(`${rai} ไร่`);
+    if (ngan > 0 || rai > 0) parts.push(`${ngan} งาน`);
+    const roundedWa = Math.round(wa * 10) / 10;
+    parts.push(`${roundedWa} ตร.ว.`);
+    
+    return parts.join(' ') + ` (${Math.round(sqm).toLocaleString()} ตร.ม.)`;
+}
 
 
 // Override Swal.fire to prevent overlapping/frozen alerts, especially on iOS Safari
@@ -560,21 +652,36 @@ function initApp() {
         // ตั้งค่าภาษาไทยสำหรับเครื่องมือวาด Geoman (รองรับคำแปลบางส่วนของ Geoman)
         map.pm.setLang('th');
 
+        // กำหนดค่าการวาดและการเลือกจุด (Snapping) ให้เหมาะสมกับ iPad/ปากกา Stylus และนิ้วมือ
+        map.pm.setGlobalOptions({
+            snappable: true,
+            snapDistance: 25, // เพิ่มระยะ Snap เป็น 25px ช่วยให้ปากกา/นิ้วแตะโดนง่ายขึ้น
+            templineStyle: {
+                color: '#2563eb',
+                weight: 4 // เส้นไกด์ตอนวาดหนาขึ้น เห็นได้ชัดเจนใต้หัวปากกาหรือนิ้วมือ
+            },
+            hintlineStyle: {
+                color: '#10b981',
+                weight: 3,
+                dashArray: [5, 5]
+            },
+            pathOptions: {
+                color: '#2563eb',
+                fillColor: '#2563eb',
+                fillOpacity: 0.2,
+                weight: 4
+            }
+        });
+
         // ดักจับเหตุการณ์การปิดโหมดแก้ไขระดับแผนที่เพื่อประมวลผลการเซฟสะสม
         map.on('pm:globaleditmodetoggled', (e) => {
-            if (!e.enabled) {
-                savePendingGeomanUpdates();
-            }
+            showPendingActionsBar();
         });
         map.on('pm:globaldragmodetoggled', (e) => {
-            if (!e.enabled) {
-                savePendingGeomanUpdates();
-            }
+            showPendingActionsBar();
         });
         map.on('pm:globalrotatemodetoggled', (e) => {
-            if (!e.enabled) {
-                savePendingGeomanUpdates();
-            }
+            showPendingActionsBar();
         });
 
         // ดักจับเมื่อมีการลบเลเยอร์ด้วยเครื่องมือลบของ Geoman
@@ -582,158 +689,185 @@ function initApp() {
             const removedLayer = e.layer;
             const jobId = removedLayer.jobId;
             if (jobId) {
-                const job = dbJobs.find(x => x.id === jobId);
+                // ตรวจสอบว่าเป็นจุดที่วาดใหม่ในคิวชั่วคราวหรือไม่
+                const newShapeIndex = window.pendingNewShapes.findIndex(x => x.id === jobId);
+                if (newShapeIndex !== -1) {
+                    window.pendingNewShapes.splice(newShapeIndex, 1);
+                    window.pendingGeomanUpdates.delete(jobId);
+                    removedLayer.remove();
+                    if (selectedJobId === jobId) {
+                        closeSheet();
+                    }
+                    showPendingActionsBar();
+                    return;
+                }
+
+                const job = findJobById(jobId);
                 if (job) {
                     selectedJobId = jobId;
                     await deleteJob();
                     // หากไม่ได้ทำการลบจริง (เช่น กดยกเลิก) ให้แสดงผลแผนที่ใหม่เพื่อคืนค่าเลเยอร์กลับมา
-                    if (dbJobs.find(x => x.id === jobId)) {
+                    if (findJobById(jobId)) {
                         renderMap();
                     }
                 }
             }
         });
 
-        map.on('pm:create', async (e) => {
+        map.on('pm:create', (e) => {
             const layer = e.layer;
             const shape = e.shape; // 'Marker', 'Rectangle', 'Polygon', 'Circle'
 
-            const currentCategory = currentUser.category || 'ทั่วไป';
-            const categoryOptionsHtml = categories.map(cat => {
-                const isSelected = cat === currentCategory ? 'selected' : '';
-                return `<option value="${cat}" ${isSelected}>${cat}</option>`;
-            }).join('');
+            let geometry = {};
+            let lat = 0;
+            let lng = 0;
+            let isCircle = false;
+            let radius = 0;
 
-            Swal.fire({
-                title: 'บันทึกรูปแปลง / ปักหมุดใหม่',
-                html: `
-                    <div class="text-left space-y-3">
-                        <div>
-                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">ชื่อแปลง / เลขทะเบียนที่ดิน (จำเป็น)</label>
-                            <input id="swal-draw-name" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans" placeholder="กรอกชื่อหรือหมายเลขทะเบียน...">
-                        </div>
-                        <div>
-                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">รายละเอียด / หมายเหตุ</label>
-                            <textarea id="swal-draw-note" rows="3" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans" placeholder="บันทึกข้อมูลเพิ่มเติม..."></textarea>
-                        </div>
-                        <div>
-                            <label class="text-xs font-bold text-gray-500 block mb-1 font-sans">ประเภทงาน / โครงการ</label>
-                            <select id="swal-draw-category" class="w-full p-2.5 border border-gray-300 rounded-xl text-sm outline-none focus:border-blue-500 font-sans">
-                                ${categoryOptionsHtml}
-                            </select>
-                        </div>
-                    </div>
-                `,
-                showCancelButton: true,
-                confirmButtonText: 'บันทึกข้อมูล',
-                confirmButtonColor: '#2563eb',
-                cancelButtonText: 'ยกเลิก',
-                preConfirm: () => {
-                    const name = document.getElementById('swal-draw-name').value.trim();
-                    const note = document.getElementById('swal-draw-note').value.trim();
-                    const category = document.getElementById('swal-draw-category').value;
-                    if (!name) {
-                        Swal.showValidationMessage('กรุณากรอกชื่อแปลง / เลขทะเบียนที่ดิน');
-                        return false;
-                    }
-                    return { name, note, category };
-                }
-            }).then(async (result) => {
-                if (result.isConfirmed) {
-                    const { name, note, category } = result.value;
+            if (shape === 'Circle') {
+                const center = layer.getLatLng();
+                lat = center.lat;
+                lng = center.lng;
+                isCircle = true;
+                radius = layer.getRadius();
+                geometry = {
+                    type: 'Point',
+                    coordinates: [lng, lat]
+                };
+            } else if (shape === 'Marker') {
+                const pos = layer.getLatLng();
+                lat = pos.lat;
+                lng = pos.lng;
+                geometry = {
+                    type: 'Point',
+                    coordinates: [lng, lat]
+                };
+            } else {
+                // Rectangle หรือ Polygon
+                geometry = layer.toGeoJSON().geometry;
+                const bounds = layer.getBounds();
+                const center = bounds.getCenter();
+                lat = center.lat;
+                lng = center.lng;
+            }
 
-                    let geometry = {};
-                    let lat = 0;
-                    let lng = 0;
-                    let isCircle = false;
-                    let radius = 0;
+            const tempJobId = 'drawn_temp_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            layer.jobId = tempJobId;
 
-                    if (shape === 'Circle') {
-                        const center = layer.getLatLng();
-                        lat = center.lat;
-                        lng = center.lng;
-                        isCircle = true;
-                        radius = layer.getRadius();
-                        geometry = {
-                            type: 'Point',
-                            coordinates: [lng, lat]
-                        };
-                    } else if (shape === 'Marker') {
-                        const pos = layer.getLatLng();
-                        lat = pos.lat;
-                        lng = pos.lng;
-                        geometry = {
-                            type: 'Point',
-                            coordinates: [lng, lat]
-                        };
-                    } else {
-                        // Rectangle หรือ Polygon
-                        geometry = layer.toGeoJSON().geometry;
-                        const bounds = layer.getBounds();
-                        const center = bounds.getCenter();
-                        lat = center.lat;
-                        lng = center.lng;
-                    }
+            // Calculate area
+            let areaSqm = 0;
+            if (isCircle) {
+                areaSqm = calculateCircleAreaInSqm(radius);
+            } else if (shape === 'Polygon' || shape === 'Rectangle') {
+                const coords = getFlatCoordinates(layer);
+                areaSqm = calculatePolygonAreaInSqm(coords);
+            }
+            const formattedArea = areaSqm > 0 ? formatThaiArea(areaSqm) : '-';
 
-                    const newJob = {
-                        id: 'drawn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9),
-                        lat: lat,
-                        lng: lng,
-                        geometry: geometry,
-                        status: 'done',
-                        category: category,
-                        properties: {
-                            name: name,
-                            note: note,
-                            is_custom_draw: true,
-                            is_circle: isCircle,
-                            radius: radius,
-                            images: [],
-                            date: new Date().toISOString().split('T')[0]
-                        }
-                    };
+            const tempJob = {
+                id: tempJobId,
+                team_id: currentUser ? currentUser.team_id : null,
+                lat: lat,
+                lng: lng,
+                geometry: geometry,
+                status: 'done',
+                category: currentUser ? currentUser.category : 'ทั่วไป',
+                properties: {
+                    name: `แปลงวาดใหม่ (${shape})`,
+                    note: '',
+                    images: [],
+                    area: formattedArea,
+                    is_temp: true,
+                    amphoe: 'วาดเอง',
+                    tambon: 'แปลงชั่วคราว',
+                    is_circle: isCircle,
+                    radius: radius,
+                    is_custom_draw: true
+                },
+                layer: layer,
+                shape: shape
+            };
 
-                    showLoading(true, 'กำลังบันทึกข้อมูลรูปแปลง/หมุด...');
-                    try {
-                        await saveJobToSupabase(newJob);
-                        dbJobs.push(newJob);
-                        renderMap();
-                        Swal.fire({ toast: true, icon: 'success', title: 'สร้างรูปแปลง/หมุดใหม่สำเร็จ', timer: 1500, showConfirmButton: false });
-                    } catch (err) {
-                        console.error("Save drawn job error:", err);
-                        Swal.fire('เกิดข้อผิดพลาด', 'บันทึกล้มเหลว: ' + err.message, 'error');
-                    } finally {
-                        showLoading(false);
-                    }
-                }
-                // ลบ layer ชั่วคราวเพื่อให้ renderMap วาดของจริงขึ้นมาแทน
-                layer.remove();
+            window.pendingNewShapes.push(tempJob);
+
+            // Bind geoman events on this new layer to track further background updates
+            bindGeomanEvents(layer, tempJobId);
+
+            // Bind temporary label
+            layer.bindTooltip('แปลงใหม่ (ยังไม่บันทึก)', {
+                permanent: true,
+                direction: 'top',
+                className: 'job-label job-label-pending font-bold animate-pulse',
+                offset: [0, -10]
             });
+
+            // Bind click event to open sheet immediately
+            layer.on('click', () => {
+                const isPmActive = map && map.pm && (
+                    map.pm.globalEditModeEnabled() || 
+                    map.pm.globalDragModeEnabled() || 
+                    map.pm.globalRotateModeEnabled() || 
+                    map.pm.globalDrawModeEnabled() ||
+                    map.pm.globalRemovalModeEnabled()
+                );
+                if (isPmActive) return;
+                
+                markerJustClicked = true;
+                openSheet(tempJob);
+            });
+
+            showPendingActionsBar();
         });
+
+        // Load PM settings from localStorage
+        const enablePm = localStorage.getItem('survey_enable_pm') === 'true';
+        const chkEnablePm = document.getElementById('chk-enable-pm');
+        if (chkEnablePm) chkEnablePm.checked = enablePm;
+        const btnTogglePm = document.getElementById('btn-toggle-pm');
+        if (enablePm) {
+            if (btnTogglePm) btnTogglePm.classList.remove('hidden');
+            toggleGeomanToolbar(true);
+        } else {
+            if (btnTogglePm) btnTogglePm.classList.add('hidden');
+            toggleGeomanToolbar(false);
+        }
     }
 }
 
 function startGpsTracking() {
-    if (gpsWatchId) navigator.geolocation.clearWatch(gpsWatchId);
-
-    gpsWatchId = navigator.geolocation.watchPosition(p => {
-        isGpsActive = true;
-        updateGpsStatus();
-        const latlng = [p.coords.latitude, p.coords.longitude];
-        if (!userMarker) {
-            userMarker = L.marker(latlng, {
-                icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' }),
-                pmIgnore: true
-            }).addTo(map);
-        } else {
-            userMarker.setLatLng(latlng);
-        }
-        if (isFollowing && !isNavigating) map.setView(latlng, 18);
-    }, e => {
+    if (!navigator || !navigator.geolocation) {
         isGpsActive = false;
         updateGpsStatus();
-        console.error("GPS Watch error", e);
-    }, { enableHighAccuracy: true });
+        console.warn("Geolocation is not supported by this browser.");
+        return;
+    }
+
+    try {
+        if (gpsWatchId) navigator.geolocation.clearWatch(gpsWatchId);
+
+        gpsWatchId = navigator.geolocation.watchPosition(p => {
+            isGpsActive = true;
+            updateGpsStatus();
+            const latlng = [p.coords.latitude, p.coords.longitude];
+            if (!userMarker) {
+                userMarker = L.marker(latlng, {
+                    icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' }),
+                    pmIgnore: true
+                }).addTo(map);
+            } else {
+                userMarker.setLatLng(latlng);
+            }
+            if (isFollowing && !isNavigating) map.setView(latlng, 18);
+        }, e => {
+            isGpsActive = false;
+            updateGpsStatus();
+            console.error("GPS Watch error", e);
+        }, { enableHighAccuracy: true });
+    } catch (err) {
+        console.error("Failed to start GPS tracking:", err);
+        isGpsActive = false;
+        updateGpsStatus();
+    }
 }
 
 function updateGpsStatus() {
@@ -749,58 +883,70 @@ function updateGpsStatus() {
 function resetGps() {
     showLoading(true, 'กำลังเปิดขอสิทธิ์ GPS อีกครั้ง...');
 
-    if (gpsWatchId) {
-        navigator.geolocation.clearWatch(gpsWatchId);
-        gpsWatchId = null;
+    if (!navigator || !navigator.geolocation) {
+        showLoading(false);
+        Swal.fire('ข้อผิดพลาด', 'อุปกรณ์ของคุณไม่รองรับ GPS หรือไม่ได้เปิดใช้งานตำแหน่งที่ตั้ง', 'error');
+        return;
     }
 
-    if (userMarker) {
-        map.removeLayer(userMarker);
-        userMarker = null;
+    try {
+        if (gpsWatchId) {
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+        }
+
+        if (userMarker) {
+            map.removeLayer(userMarker);
+            userMarker = null;
+        }
+
+        navigator.geolocation.getCurrentPosition(p => {
+            isGpsActive = true;
+            updateGpsStatus();
+            const latlng = [p.coords.latitude, p.coords.longitude];
+
+            userMarker = L.marker(latlng, {
+                icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
+            }).addTo(map);
+
+            map.setView(latlng, 17);
+            isFollowing = true;
+            const btnGps = document.getElementById('btn-gps');
+            if (btnGps) {
+                btnGps.classList.add('bg-blue-50', 'text-blue-600');
+                btnGps.classList.remove('text-gray-400');
+            }
+            showLoading(false);
+            Swal.fire({
+                icon: 'success',
+                title: 'เชื่อมต่อ GPS สำเร็จ',
+                text: 'ตำแหน่งของคุณอัปเดตบนแผนที่เรียบร้อยแล้ว',
+                timer: 2000,
+                showConfirmButton: false
+            });
+            startGpsTracking();
+        }, err => {
+            isGpsActive = false;
+            updateGpsStatus();
+            showLoading(false);
+            let errMsg = 'กรุณาตรวจสอบว่าเปิดระบุตำแหน่งบนอุปกรณ์แล้ว';
+            if (err.code === 1) {
+                errMsg = 'สิทธิ์ระบุตำแหน่งถูกปฏิเสธ กรุณากดรูปแม่กุญแจ (Padlock) ที่แถบที่อยู่เว็บ (URL Bar) และเลือก "อนุญาต" ตำแหน่ง (Location) จากนั้นลองกดรีเซ็ตอีกครั้ง';
+            }
+            Swal.fire({
+                icon: 'warning',
+                title: 'เชื่อมต่อ GPS ไม่สำเร็จ',
+                text: errMsg,
+                confirmButtonText: 'รับทราบ',
+                confirmButtonColor: '#3b82f6'
+            });
+            startGpsTracking();
+        }, { enableHighAccuracy: true, timeout: 10000 });
+    } catch (err) {
+        showLoading(false);
+        console.error("Failed to reset GPS:", err);
+        Swal.fire('ข้อผิดพลาด', 'เกิดข้อผิดพลาดในการขอสิทธิ์ GPS: ' + err.message, 'error');
     }
-
-    navigator.geolocation.getCurrentPosition(p => {
-        isGpsActive = true;
-        updateGpsStatus();
-        const latlng = [p.coords.latitude, p.coords.longitude];
-
-        userMarker = L.marker(latlng, {
-            icon: L.divIcon({ className: 'bg-blue-500 w-4 h-4 rounded-full border-2 border-white shadow' })
-        }).addTo(map);
-
-        map.setView(latlng, 17);
-        isFollowing = true;
-        const btnGps = document.getElementById('btn-gps');
-        if (btnGps) {
-            btnGps.classList.add('bg-blue-50', 'text-blue-600');
-            btnGps.classList.remove('text-gray-400');
-        }
-        showLoading(false);
-        Swal.fire({
-            icon: 'success',
-            title: 'เชื่อมต่อ GPS สำเร็จ',
-            text: 'ตำแหน่งของคุณอัปเดตบนแผนที่เรียบร้อยแล้ว',
-            timer: 2000,
-            showConfirmButton: false
-        });
-        startGpsTracking();
-    }, err => {
-        isGpsActive = false;
-        updateGpsStatus();
-        showLoading(false);
-        let errMsg = 'กรุณาตรวจสอบว่าเปิดระบุตำแหน่งบนอุปกรณ์แล้ว';
-        if (err.code === 1) {
-            errMsg = 'สิทธิ์ระบุตำแหน่งถูกปฏิเสธ กรุณากดรูปแม่กุญแจ (Padlock) ที่แถบที่อยู่เว็บ (URL Bar) และเลือก "อนุญาต" ตำแหน่ง (Location) จากนั้นลองกดรีเซ็ตอีกครั้ง';
-        }
-        Swal.fire({
-            icon: 'warning',
-            title: 'เชื่อมต่อ GPS ไม่สำเร็จ',
-            text: errMsg,
-            confirmButtonText: 'รับทราบ',
-            confirmButtonColor: '#3b82f6'
-        });
-        startGpsTracking();
-    }, { enableHighAccuracy: true, timeout: 10000 });
 }
 
 function updateUserInfo() {
@@ -948,10 +1094,10 @@ function bindGeomanEvents(layer, jobId) {
         }
 
         // ดักจับเหตุการณ์การแก้ไข ย้าย และหมุน
-        l.on('pm:edit', () => queueGeomanUpdate(l, jobId));
-        l.on('pm:dragend', () => queueGeomanUpdate(l, jobId));
-        l.on('pm:rotateend', () => queueGeomanUpdate(l, jobId));
-        l.on('pm:revert', () => dequeueGeomanUpdate(jobId));
+        l.on('pm:edit', () => { queueGeomanUpdate(l, jobId); showPendingActionsBar(); });
+        l.on('pm:dragend', () => { queueGeomanUpdate(l, jobId); showPendingActionsBar(); });
+        l.on('pm:rotateend', () => { queueGeomanUpdate(l, jobId); showPendingActionsBar(); });
+        l.on('pm:revert', () => { dequeueGeomanUpdate(jobId); showPendingActionsBar(); });
     };
 
     if (typeof layer.eachLayer === 'function') {
@@ -1001,6 +1147,38 @@ function queueGeomanUpdate(l, jobId) {
     }
 
     window.pendingGeomanUpdates.set(jobId, { lat, lng, geometry, isCircle, radius });
+
+    // Calculate new area and update job object properties in-place
+    let newAreaFormatted = '-';
+    if (isCircle) {
+        const areaSqm = calculateCircleAreaInSqm(radius);
+        newAreaFormatted = formatThaiArea(areaSqm);
+    } else if (geometry.type === 'Polygon' || geometry.type === 'MultiPolygon') {
+        const coords = getFlatCoordinates(l);
+        const areaSqm = calculatePolygonAreaInSqm(coords);
+        newAreaFormatted = formatThaiArea(areaSqm);
+    }
+
+    const job = findJobById(jobId);
+    if (job) {
+        job.lat = lat;
+        job.lng = lng;
+        job.geometry = geometry;
+        if (!job.properties) job.properties = {};
+        if (isCircle) {
+            job.properties.is_circle = true;
+            job.properties.radius = radius;
+        }
+        job.properties.area = newAreaFormatted;
+    }
+
+    // Update bottom sheet area input real-time if sheet is open for this shape
+    if (selectedJobId === jobId) {
+        const areaInput = document.getElementById('sheet-area');
+        if (areaInput) {
+            areaInput.value = newAreaFormatted;
+        }
+    }
 }
 
 function dequeueGeomanUpdate(jobId) {
@@ -1043,20 +1221,48 @@ async function savePendingGeomanUpdates() {
 
 function toggleGeomanToolbar(show) {
     const container = document.querySelector('.leaflet-bottom.leaflet-right');
+    const toolbars = document.querySelectorAll('.leaflet-pm-toolbar');
     const btn = document.getElementById('btn-toggle-pm');
-    if (!container) return;
 
-    let isCurrentlyHidden = container.classList.contains('pm-hidden');
-    let shouldHide;
-    if (show !== undefined) {
-        shouldHide = !show;
-    } else {
-        shouldHide = !isCurrentlyHidden;
+    // If controls are not yet generated in the DOM, retry up to 15 times (1.5 seconds total)
+    if (!container || toolbars.length === 0) {
+        if (!window.pmToggleRetryCount) window.pmToggleRetryCount = 0;
+        if (window.pmToggleRetryCount < 15) {
+            window.pmToggleRetryCount++;
+            setTimeout(() => toggleGeomanToolbar(show), 100);
+        }
+        return;
     }
+    // Reset retry count once found
+    window.pmToggleRetryCount = 0;
+
+    let isCurrentlyHidden = false;
+    if (container) {
+        isCurrentlyHidden = container.classList.contains('pm-hidden');
+    } else if (toolbars.length > 0) {
+        isCurrentlyHidden = toolbars[0].classList.contains('hidden');
+    }
+
+    let shouldHide = show !== undefined ? !show : !isCurrentlyHidden;
+
+    if (container) {
+        if (shouldHide) {
+            container.classList.add('pm-hidden');
+        } else {
+            container.classList.remove('pm-hidden');
+        }
+    }
+
+    toolbars.forEach(toolbar => {
+        if (shouldHide) {
+            toolbar.classList.add('hidden');
+        } else {
+            toolbar.classList.remove('hidden');
+        }
+    });
 
     if (shouldHide) {
         // ทำการซ่อนเครื่องมือ
-        container.classList.add('pm-hidden');
         if (btn) {
             btn.classList.remove('bg-purple-600', 'text-white');
             btn.classList.add('bg-white', 'text-purple-600');
@@ -1072,7 +1278,6 @@ function toggleGeomanToolbar(show) {
         }
     } else {
         // แสดงเครื่องมือ
-        container.classList.remove('pm-hidden');
         if (btn) {
             btn.classList.add('bg-purple-600', 'text-white');
             btn.classList.remove('bg-white', 'text-purple-600');
@@ -1081,6 +1286,284 @@ function toggleGeomanToolbar(show) {
     }
 }
 window.toggleGeomanToolbar = toggleGeomanToolbar;
+
+function togglePMEnabledSetting(enabled) {
+    localStorage.setItem('survey_enable_pm', enabled ? 'true' : 'false');
+    const chk = document.getElementById('chk-enable-pm');
+    if (chk) chk.checked = enabled;
+    const btnTogglePm = document.getElementById('btn-toggle-pm');
+    if (enabled) {
+        if (btnTogglePm) btnTogglePm.classList.remove('hidden');
+        toggleGeomanToolbar(true);
+    } else {
+        if (btnTogglePm) btnTogglePm.classList.add('hidden');
+        toggleGeomanToolbar(false);
+    }
+}
+window.togglePMEnabledSetting = togglePMEnabledSetting;
+
+function showPendingActionsBar() {
+    const bar = document.getElementById('pending-actions-bar');
+    if (!bar) return;
+    
+    const newCount = window.pendingNewShapes ? window.pendingNewShapes.length : 0;
+    const editCount = window.pendingGeomanUpdates ? Array.from(window.pendingGeomanUpdates.keys()).filter(key => !key.startsWith('drawn_temp_')).length : 0;
+    
+    if (newCount > 0 || editCount > 0) {
+        bar.classList.remove('hidden');
+        const textEl = document.getElementById('pending-actions-text');
+        if (textEl) {
+            textEl.innerText = `วาดใหม่: ${newCount} | แก้ไข: ${editCount}`;
+        }
+    } else {
+        bar.classList.add('hidden');
+    }
+}
+window.showPendingActionsBar = showPendingActionsBar;
+
+async function cancelAllPendingChanges() {
+    const result = await Swal.fire({
+        title: 'ยืนยันการยกเลิก?',
+        text: 'การวาดและแก้ไขรูปแปลงทั้งหมดที่ยังไม่ได้บันทึกจะถูกล้างออก',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        cancelButtonColor: '#6b7280',
+        confirmButtonText: 'ใช่, ยกเลิกทั้งหมด',
+        cancelButtonText: 'ปิด'
+    });
+
+    if (!result.isConfirmed) return;
+
+    if (window.pendingNewShapes && window.pendingNewShapes.length > 0) {
+        window.pendingNewShapes.forEach(item => {
+            if (item.layer) {
+                if (map && item.layer.pm && typeof item.layer.pm.disable === 'function') {
+                    item.layer.pm.disable();
+                }
+                map.removeLayer(item.layer);
+            }
+        });
+    }
+
+    window.pendingNewShapes = [];
+    if (window.pendingGeomanUpdates) {
+        window.pendingGeomanUpdates.clear();
+    }
+
+    if (map && map.pm) {
+        map.pm.disableGlobalEditMode();
+        map.pm.disableGlobalDragMode();
+        map.pm.disableGlobalRotateMode();
+        map.pm.disableGlobalRemovalMode();
+        if (map.pm.Draw) map.pm.Draw.disable();
+    }
+
+    renderMap();
+    showPendingActionsBar();
+
+    Swal.fire({
+        toast: true,
+        position: 'top',
+        icon: 'info',
+        title: 'ยกเลิกการเปลี่ยนแปลงทั้งหมดแล้ว',
+        timer: 1500,
+        showConfirmButton: false
+    });
+}
+window.cancelAllPendingChanges = cancelAllPendingChanges;
+
+async function saveAllPendingChanges() {
+    const newCount = window.pendingNewShapes ? window.pendingNewShapes.length : 0;
+    const editCount = window.pendingGeomanUpdates ? Array.from(window.pendingGeomanUpdates.keys()).filter(key => !key.startsWith('drawn_temp_')).length : 0;
+
+    if (newCount === 0 && editCount === 0) {
+        Swal.fire('ไม่มีข้อมูลที่เปลี่ยนแปลง', '', 'info');
+        return;
+    }
+
+    if (map && map.pm) {
+        map.pm.disableGlobalEditMode();
+        map.pm.disableGlobalDragMode();
+        map.pm.disableGlobalRotateMode();
+        map.pm.disableGlobalRemovalMode();
+        if (map.pm.Draw) map.pm.Draw.disable();
+    }
+
+    const newJobsToSave = [];
+    const existingJobsToUpdate = [];
+
+    const collectedDetails = [];
+    for (let i = 0; i < newCount; i++) {
+        const shape = window.pendingNewShapes[i];
+        
+        if (shape.layer) {
+            if (typeof shape.layer.getBounds === 'function') {
+                map.fitBounds(shape.layer.getBounds(), { padding: [100, 100] });
+            } else if (typeof shape.layer.getLatLng === 'function') {
+                map.setView(shape.layer.getLatLng(), 17);
+            }
+        }
+
+        let optionsHtml = '';
+        categories.forEach(cat => {
+            optionsHtml += `<option value="${cat}" ${cat === currentUser.category ? 'selected' : ''}>${cat}</option>`;
+        });
+
+        const { value: formValues } = await Swal.fire({
+            title: `ระบุข้อมูลแปลงใหม่ (${i + 1}/${newCount})`,
+            html: `
+                <div class="text-left space-y-3">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">ชื่อแปลง / เลขทะเบียน</label>
+                        <input id="swal-job-name" class="swal2-input w-full m-0 px-3 py-2 text-sm border rounded-xl" placeholder="เช่น แปลง 101" style="box-sizing:border-box; height:auto; margin:0;" value="แปลงใหม่ ${i+1}">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">รายละเอียด / หมายเหตุ</label>
+                        <textarea id="swal-job-note" class="swal2-textarea w-full m-0 px-3 py-2 text-sm border rounded-xl" placeholder="เช่น รายละเอียดแปลง" style="box-sizing:border-box; height:60px; margin:0;"></textarea>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">ประเภทงาน / โครงการ</label>
+                        <select id="swal-job-category" class="swal2-select w-full m-0 px-3 py-2 text-sm border rounded-xl" style="box-sizing:border-box; height:auto; margin:0; width:100%;">
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                </div>
+            `,
+            focusConfirm: false,
+            showCancelButton: true,
+            cancelButtonText: 'ยกเลิกการบันทึกทั้งหมด',
+            confirmButtonText: 'ถัดไป',
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#ef4444',
+            preConfirm: () => {
+                const name = document.getElementById('swal-job-name').value.trim();
+                const note = document.getElementById('swal-job-note').value.trim();
+                const category = document.getElementById('swal-job-category').value;
+                if (!name) {
+                    Swal.showValidationMessage('กรุณาระบุชื่อแปลง');
+                    return false;
+                }
+                return { name, note, category };
+            }
+        });
+
+        if (!formValues) {
+            Swal.fire({
+                icon: 'info',
+                title: 'ยกเลิกการบันทึกชั่วคราว',
+                text: 'การบันทึกถูกระงับ ข้อมูลการวาดบนแผนที่ยังไม่ถูกลบ'
+            });
+            return;
+        }
+
+        collectedDetails.push(formValues);
+    }
+
+    for (let i = 0; i < newCount; i++) {
+        const shape = window.pendingNewShapes[i];
+        const formValues = collectedDetails[i];
+
+        if (shape.layer) {
+            map.removeLayer(shape.layer);
+        }
+
+        let finalLat = shape.lat;
+        let finalLng = shape.lng;
+        let finalGeometry = shape.geometry;
+        let finalRadius = shape.radius;
+
+        if (window.pendingGeomanUpdates.has(shape.id)) {
+            const up = window.pendingGeomanUpdates.get(shape.id);
+            finalLat = up.lat;
+            finalLng = up.lng;
+            finalGeometry = up.geometry;
+            finalRadius = up.radius;
+            window.pendingGeomanUpdates.delete(shape.id);
+        }
+
+        const finalId = 'custom_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9) + '_' + i;
+
+        const properties = {
+            name: formValues.name,
+            note: formValues.note,
+            date: new Date().toISOString().split('T')[0],
+            is_custom_draw: true,
+            navigator_id: null,
+            navigator_name: null,
+            images: []
+        };
+        if (shape.properties && shape.properties.is_circle) {
+            properties.is_circle = true;
+            properties.radius = finalRadius;
+        }
+
+        newJobsToSave.push({
+            id: finalId,
+            team_id: currentUser.team_id,
+            lat: finalLat,
+            lng: finalLng,
+            geometry: finalGeometry,
+            status: 'done',
+            category: formValues.category,
+            properties: properties,
+            updated_at: new Date().toISOString()
+        });
+    }
+
+    const updates = Array.from(window.pendingGeomanUpdates.entries());
+    for (const [jobId, data] of updates) {
+        const job = dbJobs.find(x => x.id === jobId);
+        if (job) {
+            job.lat = data.lat;
+            job.lng = data.lng;
+            job.geometry = data.geometry;
+            if (!job.properties) job.properties = {};
+            if (data.isCircle) {
+                job.properties.is_circle = true;
+                job.properties.radius = data.radius;
+            }
+            job.updated_at = new Date().toISOString();
+            existingJobsToUpdate.push(job);
+        }
+    }
+
+    showLoading(true, 'กำลังบันทึกข้อมูลรูปแปลงทั้งหมด...');
+    try {
+        const allSaves = [];
+        
+        newJobsToSave.forEach(j => {
+            allSaves.push(saveJobToSupabase(j));
+        });
+
+        existingJobsToUpdate.forEach(j => {
+            allSaves.push(saveJobToSupabase(j));
+        });
+
+        await Promise.all(allSaves);
+
+        window.pendingNewShapes = [];
+        window.pendingGeomanUpdates.clear();
+
+        await syncJobsFromDB();
+        showPendingActionsBar();
+
+        Swal.fire({
+            icon: 'success',
+            title: 'บันทึกข้อมูลเรียบร้อยแล้ว',
+            text: `บันทึกรูปแปลงใหม่ ${newJobsToSave.length} รายการ และอัปเดตพิกัด ${existingJobsToUpdate.length} รายการ`,
+            timer: 2500,
+            showConfirmButton: true
+        });
+    } catch (err) {
+        console.error("Save all pending error:", err);
+        Swal.fire('บันทึกล้มเหลว', 'เกิดข้อผิดพลาดในการบันทึก: ' + err.message, 'error');
+        renderMap();
+    } finally {
+        showLoading(false);
+    }
+}
+window.saveAllPendingChanges = saveAllPendingChanges;
 
 function renderMap(fitBounds = false) {
     // ปิดการใช้งาน Geoman บน layer เดิมเพื่อป้องกันจุดยอดค้าง (orphaned helper markers)
@@ -1188,7 +1671,19 @@ function renderMap(fitBounds = false) {
                 });
             }
 
-            layer.on('click', () => { markerJustClicked = true; openSheet(job); });
+            layer.on('click', () => {
+                const isPmActive = map && map.pm && (
+                    map.pm.globalEditModeEnabled() || 
+                    map.pm.globalDragModeEnabled() || 
+                    map.pm.globalRotateModeEnabled() || 
+                    map.pm.globalDrawModeEnabled() ||
+                    map.pm.globalRemovalModeEnabled()
+                );
+                if (isPmActive) return;
+
+                markerJustClicked = true;
+                openSheet(job);
+            });
             markersGroup.addLayer(layer);
             group.addLayer(layer);
         }
@@ -1211,7 +1706,7 @@ function speak(text) {
 
 async function startNav() {
     if (!userMarker) return Swal.fire('GPS ไม่พร้อม', '', 'warning');
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
 
     // ตรวจสอบคิวความขัดแย้งการล๊อกเป้าหมายชนกัน (Concurrency lock check)
@@ -1317,7 +1812,7 @@ async function stopNav() {
     if (navInterval) clearInterval(navInterval);
     document.getElementById('btn-nav-start').classList.remove('hidden');
     document.getElementById('btn-nav-cancel').classList.add('hidden');
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (job) {
         job.status = job.prevStatus || 'waiting';
         if (!job.properties) job.properties = {};
@@ -1363,6 +1858,7 @@ function openSheet(job) {
 
     const isNavByOther = job.status === 'navigating' && p.navigator_id && p.navigator_id !== currentUser.id;
     const isDone = job.status === 'done';
+    const isTemp = p && p.is_temp === true;
 
     if (isNavByOther) {
         // Locked by another user
@@ -1377,6 +1873,19 @@ function openSheet(job) {
         if (btnDelete) btnDelete.classList.add('hidden');
         toggleInputs(false);
         renderImageGallery(p.images || [], false);
+    } else if (isTemp) {
+        if (navWarning) navWarning.classList.add('hidden');
+        btnNavStart.classList.add('hidden');
+        btnNavCancel.classList.add('hidden');
+        btnSave.classList.remove('hidden');
+        btnEdit.classList.add('hidden');
+        if (btnDelete) {
+            btnDelete.classList.remove('hidden');
+            btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ยกเลิกการวาด / ลบ';
+            btnDelete.className = 'w-full bg-red-600 text-white py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2 hover:bg-red-700 transition duration-200';
+        }
+        toggleInputs(true);
+        renderImageGallery(p.images || [], true);
     } else {
         // Not locked by others
         if (navWarning) navWarning.classList.add('hidden');
@@ -1465,6 +1974,7 @@ function openSheetSilently(job) {
 
     const isNavByOther = job.status === 'navigating' && p.navigator_id && p.navigator_id !== currentUser.id;
     const isDone = job.status === 'done';
+    const isTemp = p && p.is_temp === true;
 
     if (isNavByOther) {
         if (navWarning && navWarningText) {
@@ -1478,6 +1988,19 @@ function openSheetSilently(job) {
         if (btnDelete) btnDelete.classList.add('hidden');
         toggleInputs(false);
         renderImageGallery(p.images || [], false);
+    } else if (isTemp) {
+        if (navWarning) navWarning.classList.add('hidden');
+        btnNavStart.classList.add('hidden');
+        btnNavCancel.classList.add('hidden');
+        btnSave.classList.remove('hidden');
+        btnEdit.classList.add('hidden');
+        if (btnDelete) {
+            btnDelete.classList.remove('hidden');
+            btnDelete.innerHTML = '<i class="fa-solid fa-trash-can"></i> ยกเลิกการวาด / ลบ';
+            btnDelete.className = 'w-full bg-red-600 text-white py-3 rounded-xl text-sm font-bold mt-2 flex items-center justify-center gap-2 hover:bg-red-700 transition duration-200';
+        }
+        toggleInputs(true);
+        renderImageGallery(p.images || [], true);
     } else {
         if (navWarning) navWarning.classList.add('hidden');
 
@@ -1523,7 +2046,7 @@ function enableEdit() {
     document.getElementById('btn-save').classList.remove('hidden');
     document.getElementById('btn-edit').classList.add('hidden');
 
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (job) {
         window.imagesToDeleteFromCloud = [];
         window.originalImagesBackup = job.properties.images ? JSON.parse(JSON.stringify(job.properties.images)) : [];
@@ -1536,7 +2059,7 @@ function closeSheet(e) {
     if (e) e.stopPropagation();
 
     if (selectedJobId) {
-        const job = dbJobs.find(j => j.id === selectedJobId);
+        const job = findJobById(selectedJobId);
         if (job) {
             const btnSave = document.getElementById('btn-save');
             const isEditing = btnSave && !btnSave.classList.contains('hidden');
@@ -1587,7 +2110,7 @@ function findNearestNewJob() {
 }
 
 function viewJsonData() {
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
 
     const sheet = document.getElementById('sheet');
@@ -2011,7 +2534,7 @@ async function importData(input) {
 }
 
 async function saveData() {
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
 
     if (isNavigating) await stopNav();
@@ -2059,17 +2582,77 @@ async function saveData() {
         }
 
         // --- ส่วนที่ 2: บันทึกข้อมูลข้อความลงฐานข้อมูล Supabase ---
-        job.status = 'done';
-        job.properties.name = document.getElementById('sheet-name').value;
-        job.properties.note = document.getElementById('sheet-note').value;
-        job.properties.date = new Date().toISOString().split('T')[0];
-        job.properties.navigator_id = null;
-        job.properties.navigator_name = null;
+        const isTemp = job.properties && job.properties.is_temp === true;
+        const nameVal = document.getElementById('sheet-name').value;
+        const noteVal = document.getElementById('sheet-note').value;
 
-        await saveJobToSupabase(job);
+        if (isTemp) {
+            // Generate a permanent ID
+            const permanentId = 'custom_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+            
+            // Build permanent job object
+            const savedJob = {
+                id: permanentId,
+                team_id: currentUser.team_id,
+                lat: job.lat,
+                lng: job.lng,
+                geometry: job.geometry,
+                status: 'done',
+                category: currentUser.category,
+                properties: {
+                    name: nameVal || `แปลงวาดใหม่`,
+                    note: noteVal || '',
+                    date: new Date().toISOString().split('T')[0],
+                    is_custom_draw: true,
+                    navigator_id: null,
+                    navigator_name: null,
+                    images: job.properties.images || [],
+                    area: job.properties.area || '-',
+                    amphoe: 'วาดเอง',
+                    tambon: 'แปลงชั่วคราว'
+                }
+            };
 
-        renderMap();
-        closeSheet();
+            if (job.properties.is_circle) {
+                savedJob.properties.is_circle = true;
+                savedJob.properties.radius = job.properties.radius;
+            }
+
+            await saveJobToSupabase(savedJob);
+
+            // Remove temporary layer from map
+            if (job.layer) {
+                if (map && job.layer.pm && typeof job.layer.pm.disable === 'function') {
+                    job.layer.pm.disable();
+                }
+                map.removeLayer(job.layer);
+            }
+
+            // Remove from local queues
+            const newShapeIndex = window.pendingNewShapes.findIndex(x => x.id === job.id);
+            if (newShapeIndex !== -1) {
+                window.pendingNewShapes.splice(newShapeIndex, 1);
+            }
+            window.pendingGeomanUpdates.delete(job.id);
+
+            // Fetch latest data and sync map
+            await syncJobsFromDB();
+            closeSheet();
+            showPendingActionsBar();
+        } else {
+            job.status = 'done';
+            job.properties.name = nameVal;
+            job.properties.note = noteVal;
+            job.properties.date = new Date().toISOString().split('T')[0];
+            job.properties.navigator_id = null;
+            job.properties.navigator_name = null;
+
+            await saveJobToSupabase(job);
+
+            renderMap();
+            closeSheet();
+        }
+
         Swal.fire({ toast: true, icon: 'success', title: 'บันทึกข้อมูลเรียบร้อย', timer: 1500, showConfirmButton: false });
     } catch (e) {
         console.error("Save Data Error:", e);
@@ -2080,8 +2663,38 @@ async function saveData() {
 }
 
 async function deleteJob() {
-    const job = dbJobs.find(x => x.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
+
+    // Check if temporary drawn shape
+    if (job.properties && job.properties.is_temp === true) {
+        // Revoke temporary image blobs
+        if (job.properties.images) {
+            job.properties.images.forEach(img => {
+                if (img && img.isTemp && img.url && img.url.startsWith('blob:')) {
+                    URL.revokeObjectURL(img.url);
+                }
+            });
+        }
+        // Remove layer from map
+        if (job.layer) {
+            if (map && job.layer.pm && typeof job.layer.pm.disable === 'function') {
+                job.layer.pm.disable();
+            }
+            map.removeLayer(job.layer);
+        }
+        // Remove from pending queues
+        const newShapeIndex = window.pendingNewShapes.findIndex(x => x.id === job.id);
+        if (newShapeIndex !== -1) {
+            window.pendingNewShapes.splice(newShapeIndex, 1);
+        }
+        window.pendingGeomanUpdates.delete(job.id);
+
+        closeSheet();
+        showPendingActionsBar();
+        Swal.fire({ toast: true, icon: 'success', title: 'ยกเลิกการวาดเรียบร้อย', timer: 1500, showConfirmButton: false });
+        return;
+    }
 
     // Check if custom drawn item
     if (job.properties && job.properties.is_custom_draw === true) {
@@ -2279,7 +2892,7 @@ async function deleteJob() {
 }
 
 function navGoogle() {
-    const j = dbJobs.find(x => x.id === selectedJobId);
+    const j = findJobById(selectedJobId);
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${j.lat},${j.lng}`, '_blank');
 }
 
@@ -3353,7 +3966,7 @@ function doSearch() {
 }
 
 function openSheetFromSearch(id) {
-    const j = dbJobs.find(x => x.id === id);
+    const j = findJobById(id);
     if (j) {
         openSheet(j);
         document.getElementById('sheet').classList.add('minimized');
@@ -3458,7 +4071,7 @@ function renderImageGallery(images, editable) {
                 e.stopPropagation();
                 e.preventDefault();
 
-                const job = dbJobs.find(j => j.id === selectedJobId);
+                const job = findJobById(selectedJobId);
                 if (!job || !job.properties.images) return;
 
                 const imageToDel = job.properties.images[idx];
@@ -3603,7 +4216,7 @@ function compressImage(file, targetWidth = 800, quality = 0.75) {
 }
 
 function triggerCamera() {
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
     const images = job.properties.images || [];
     if (images.length >= 6) {
@@ -3625,7 +4238,7 @@ async function handleImageUpload(event) {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    const job = dbJobs.find(j => j.id === selectedJobId);
+    const job = findJobById(selectedJobId);
     if (!job) return;
     if (!job.properties.images) job.properties.images = [];
 

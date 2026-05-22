@@ -56,8 +56,8 @@
 
     <style>
         :root {
-            --safe-top: env(safe-area-inset-top);
-            --safe-bottom: env(safe-area-inset-bottom);
+            --safe-top: env(safe-area-inset-top, 0px);
+            --safe-bottom: env(safe-area-inset-bottom, 0px);
         }
 
         .hidden {
@@ -519,8 +519,8 @@
             right: 0;
             background: white;
             border-radius: 24px 24px 0 0;
-            transform: translateY(100%);
-            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+            transform: translateY(calc(100% + 80px));
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), visibility 0.3s;
             z-index: 2000;
             max-height: 85vh;
             display: flex;
@@ -528,14 +528,20 @@
             padding-bottom: var(--safe-bottom);
             /* ยกหลบแถบ iPhone */
             box-shadow: 0 -10px 40px rgba(0, 0, 0, 0.2);
+            visibility: hidden;
+            pointer-events: none;
         }
 
         #sheet.active {
             transform: translateY(0);
+            visibility: visible;
+            pointer-events: auto;
         }
 
         #sheet.minimized {
             transform: translateY(calc(100% - 145px - var(--safe-bottom)));
+            visibility: visible;
+            pointer-events: auto;
         }
 
         .sheet-header {
@@ -799,7 +805,7 @@
         .leaflet-bottom.leaflet-right {
             position: absolute !important;
             right: 10px !important;
-            bottom: calc(230px + var(--safe-bottom)) !important;
+            bottom: calc(300px + var(--safe-bottom)) !important;
             top: auto !important;
             z-index: 890 !important;
             display: flex !important;
@@ -814,7 +820,7 @@
 
         /* เมื่อมีคลาส sheet-open (Bottom Sheet เปิดอยู่) ดันขึ้นไปอีก */
         #map.sheet-open .leaflet-bottom.leaflet-right {
-            bottom: calc(370px + var(--safe-bottom)) !important;
+            bottom: calc(450px + var(--safe-bottom)) !important;
         }
 
         /* สไตล์ของแต่ละแถบเครื่องมือ (Draw and Edit) ให้แสดงผลกลมกลืน */
@@ -829,7 +835,7 @@
             gap: 8px !important;
         }
 
-        /* ปรับลักษณะปุ่มเครื่องมือให้กลมสวยงาม */
+        /* ปรับลักษณะปุ่มเครื่องมือให้กลมสวยงาม และปรับตำแหน่งไอคอนรูปวาด Geoman ให้กึ่งกลาง */
         .leaflet-right .leaflet-pm-toolbar .leaflet-buttons-control-button {
             border-radius: 50% !important;
             width: 48px !important;
@@ -841,10 +847,118 @@
             justify-content: center !important;
             align-items: center !important;
             transition: all 0.2s !important;
+            background-position: center !important;
+            background-repeat: no-repeat !important;
+            background-size: 24px !important;
+        }
+
+        .leaflet-right .leaflet-pm-toolbar .leaflet-buttons-control-button .control-icon {
+            background-position: center !important;
+            background-repeat: no-repeat !important;
+            background-size: 24px !important;
+            width: 100% !important;
+            height: 100% !important;
         }
 
         .leaflet-right .leaflet-pm-toolbar .leaflet-buttons-control-button:active {
             transform: scale(0.95) !important;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translate(-50%, 20px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+        }
+        .animate-fade-in {
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* Responsive Layouts */
+        @media (min-width: 640px) {
+            #sheet {
+                top: calc(10px + var(--safe-top)) !important;
+                bottom: calc(10px + var(--safe-bottom)) !important;
+                left: 10px !important;
+                right: auto !important;
+                width: 380px !important;
+                max-height: none !important;
+                border-radius: 24px !important;
+                transform: translateX(-420px) !important;
+                transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), visibility 0.3s !important;
+                box-shadow: 10px 0 40px rgba(0, 0, 0, 0.15) !important;
+            }
+            #sheet.active {
+                transform: translateX(0) !important;
+                visibility: visible !important;
+                pointer-events: auto !important;
+            }
+            #sheet.minimized {
+                transform: translateX(-420px) !important;
+                visibility: hidden !important;
+                pointer-events: none !important;
+            }
+            .fab-col.sheet-open {
+                bottom: calc(30px + var(--safe-bottom)) !important;
+            }
+            #top-bar {
+                left: 50% !important;
+                right: auto !important;
+                transform: translateX(-50%) !important;
+                width: 100% !important;
+                max-width: 520px !important;
+            }
+            #map.sheet-open .leaflet-bottom.leaflet-right {
+                bottom: calc(300px + var(--safe-bottom)) !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .search-input {
+                font-size: 12px !important;
+            }
+            .filter-select {
+                font-size: 10px !important;
+                padding: 2px !important;
+            }
+            .control-btn {
+                width: 40px !important;
+                height: 40px !important;
+                font-size: 16px !important;
+            }
+            #status-bar {
+                font-size: 11px !important;
+                padding: 4px 10px !important;
+            }
+            .btn-fab {
+                width: 48px !important;
+                height: 48px !important;
+                font-size: 18px !important;
+            }
+        }
+
+        /* iPad / Tablet / Mobile Touch and Apple Pencil optimizations for Drawing & Editing */
+        #map .marker-icon.leaflet-div-icon {
+            width: 24px !important;
+            height: 24px !important;
+            margin-left: -12px !important;
+            margin-top: -12px !important;
+            border-radius: 50% !important;
+            background-color: #ffffff !important;
+            border: 3px solid #2563eb !important;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3) !important;
+            z-index: 2000 !important;
+        }
+
+        #map .marker-icon-middle.leaflet-div-icon {
+            width: 18px !important;
+            height: 18px !important;
+            margin-left: -9px !important;
+            margin-top: -9px !important;
+            border-radius: 50% !important;
+            background-color: #ffffff !important;
+            border: 2px dashed #f97316 !important;
+            opacity: 0.95 !important;
+            box-shadow: 0 3px 6px rgba(0, 0, 0, 0.25) !important;
+            z-index: 1999 !important;
         }
     </style>
 </head>
@@ -1221,6 +1335,18 @@
                         </div>
                     </div>
 
+                    <!-- เปิด/ปิดเครื่องมือวาดรูปแปลง -->
+                    <div class="p-4 border border-gray-200 rounded-2xl flex items-center justify-between bg-gray-50/50">
+                        <div>
+                            <label class="text-xs font-bold text-gray-700 block">เครื่องมือวาดและแก้ไขรูปแปลง</label>
+                            <span class="text-[9px] text-gray-500 block leading-normal">แสดงปุ่มและแถบเครื่องมือสำหรับสร้าง/แก้ไขขอบเขตแปลงที่ดิน</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="chk-enable-pm" class="sr-only peer" onchange="togglePMEnabledSetting(this.checked)">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
                     <!-- ประเภทงาน / โครงการที่กำลังสำรวจ -->
                     <div class="p-4 border border-gray-200 rounded-2xl space-y-3 bg-gray-50/50">
                         <label class="text-xs font-bold text-gray-700 block">ประเภทงาน / โครงการที่กำลังสำรวจ</label>
@@ -1497,6 +1623,21 @@
                     </button>
                 </div>
             </div>
+        </div>
+    <!-- Pending Actions Floating Banner -->
+    <div id="pending-actions-bar" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[4000] w-[90%] max-w-[450px] bg-white/95 backdrop-blur-md border border-white/50 shadow-2xl rounded-2xl p-4 flex items-center justify-between gap-4 animate-fade-in">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-full bg-orange-100 flex items-center justify-center text-orange-600 animate-pulse">
+                <i class="fa-solid fa-triangle-exclamation text-lg"></i>
+            </div>
+            <div>
+                <div class="text-xs font-bold text-gray-800">มีรายการรอยืนยันการเปลี่ยนแปลง</div>
+                <div class="text-[10px] text-gray-500 font-semibold" id="pending-actions-text">วาดใหม่: 0 | แก้ไข: 0</div>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="cancelAllPendingChanges()" class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-xl transition active:scale-95">ยกเลิก</button>
+            <button onclick="saveAllPendingChanges()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md transition active:scale-95">เสร็จสิ้น</button>
         </div>
     </div>
 
