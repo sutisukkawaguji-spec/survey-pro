@@ -2814,6 +2814,11 @@ function closeSheet(e) {
     selectedJobId = null;
     window.imagesToDeleteFromCloud = [];
     window.originalImagesBackup = [];
+
+    // Clear UI inputs when closing sheet
+    document.getElementById('sheet-name').value = '';
+    document.getElementById('sheet-note').value = '';
+    renderImageGallery([], false);
 }
 
 
@@ -3339,6 +3344,8 @@ async function saveData() {
         const nameVal = document.getElementById('sheet-name').value;
         const noteVal = document.getElementById('sheet-note').value;
         const hasNote = noteVal && noteVal.trim() !== "";
+        const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
+        const hasNoteOrImages = hasNote || hasImages;
 
         if (isTemp) {
             // Generate a permanent ID
@@ -3351,12 +3358,12 @@ async function saveData() {
                 lat: job.lat,
                 lng: job.lng,
                 geometry: job.geometry,
-                status: hasNote ? 'done' : 'waiting',
+                status: hasNoteOrImages ? 'done' : 'waiting',
                 category: currentUser.category,
                 properties: {
                     name: nameVal || `แปลงวาดใหม่`,
                     note: noteVal || '',
-                    date: hasNote ? new Date().toISOString().split('T')[0] : '',
+                    date: hasNoteOrImages ? new Date().toISOString().split('T')[0] : '',
                     is_custom_draw: true,
                     navigator_id: null,
                     navigator_name: null,
@@ -3394,10 +3401,10 @@ async function saveData() {
             closeSheet();
             showPendingActionsBar();
         } else {
-            job.status = hasNote ? 'done' : 'waiting';
+            job.status = hasNoteOrImages ? 'done' : 'waiting';
             job.properties.name = nameVal;
             job.properties.note = noteVal;
-            job.properties.date = hasNote ? new Date().toISOString().split('T')[0] : '';
+            job.properties.date = hasNoteOrImages ? new Date().toISOString().split('T')[0] : '';
             job.properties.navigator_id = null;
             job.properties.navigator_name = null;
             job.updated_at = new Date().toISOString();
