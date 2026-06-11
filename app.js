@@ -432,6 +432,7 @@ let selectedJobId = null, lastSelectedJobId = null, currentUser = { name: 'ผ�
 let viewMode = 'original', isNavigating = false, isFollowing = false;
 let recognition = null, isVoiceActive = false, isVoiceMuted = false;
 let speechSynth = window.speechSynthesis;
+let isSpeechEnabled = localStorage.getItem('survey_speech_enabled') !== 'false';
 let navInterval = null;
 let markerJustClicked = false;
 let isMapClickBlocked = false;
@@ -815,6 +816,11 @@ function initApp() {
         const enablePm = localStorage.getItem('survey_enable_pm') === 'true';
         const chkEnablePm = document.getElementById('chk-enable-pm');
         if (chkEnablePm) chkEnablePm.checked = enablePm;
+
+        // Load Speech Enable setting from localStorage
+        const isEnabled = localStorage.getItem('survey_speech_enabled') !== 'false';
+        const chkEnableSpeech = document.getElementById('chk-enable-speech');
+        if (chkEnableSpeech) chkEnableSpeech.checked = isEnabled;
         const btnTogglePm = document.getElementById('btn-toggle-pm');
         if (enablePm) {
             if (btnTogglePm) btnTogglePm.classList.remove('hidden');
@@ -1163,6 +1169,81 @@ function startReadingSequence(rows, startLine, countLines) {
     }
 }
 
+function isLatLngInJob(latlng, job) {
+    if (!latlng || !job) return false;
+    const lat = Number(latlng.lat);
+    const lng = Number(latlng.lng);
+    if (isNaN(lat) || isNaN(lng)) return false;
+
+    // 1. Circle check
+    if (job.properties && job.properties.is_circle && job.properties.radius) {
+        if (map) {
+            const distance = map.distance([lat, lng], [Number(job.lat), Number(job.lng)]);
+            return distance <= Number(job.properties.radius);
+        }
+    }
+
+    // 2. Polygon / MultiPolygon check
+    if (job.geometry && (job.geometry.type === 'Polygon' || job.geometry.type === 'MultiPolygon')) {
+        const type = job.geometry.type;
+        const coords = job.geometry.coordinates;
+
+        const rayCast = (x, y, vs) => {
+            let inside = false;
+            for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+                const xi = Number(vs[i][0]), yi = Number(vs[i][1]);
+                const xj = Number(vs[j][0]), yj = Number(vs[j][1]);
+                const intersect = ((yi > y) !== (yj > y))
+                    && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+                if (intersect) inside = !inside;
+            }
+            return inside;
+        };
+
+        if (type === 'Polygon') {
+            if (coords && coords[0]) {
+                return rayCast(lng, lat, coords[0]);
+            }
+        } else if (type === 'MultiPolygon') {
+            for (let p = 0; p < coords.length; p++) {
+                const polygonCoords = coords[p];
+                if (polygonCoords && polygonCoords[0]) {
+                    if (rayCast(lng, lat, polygonCoords[0])) {
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Point check (if user is within 15 meters)
+    if (job.geometry && job.geometry.type === 'Point') {
+        if (map) {
+            const distance = map.distance([lat, lng], [Number(job.lat), Number(job.lng)]);
+            return distance <= 15;
+        }
+    }
+
+    return false;
+}
+
+function findJobContainingUser() {
+    if (!userMarker) return null;
+    const latlng = userMarker.getLatLng();
+    const activeJobs = getFilteredJobs();
+    for (let i = 0; i < activeJobs.length; i++) {
+        if (isLatLngInJob(latlng, activeJobs[i])) {
+            return activeJobs[i];
+        }
+    }
+    for (let i = 0; i < dbJobs.length; i++) {
+        if (isLatLngInJob(latlng, dbJobs[i])) {
+            return dbJobs[i];
+        }
+    }
+    return null;
+}
+
 async function handleVoiceCommand(transcript) {
     const cleanTranscript = transcript.replace(/\s+/g, '');
 
@@ -1190,7 +1271,7 @@ async function handleVoiceCommand(transcript) {
         const isStopReading = cleanTranscript.includes("หยุดอ่าน") || cleanTranscript.includes("หยุดพูด") || (cleanTranscript === "หยุด" && document.getElementById('swal-raw-data-container'));
         if (isStopReading) {
             stopReadingSequence();
-            speak("หยุดอ่าน");
+            speak("หยุดอ่าน", true);
             return;
         }
 
@@ -1251,19 +1332,19 @@ async function handleVoiceCommand(transcript) {
                         }
 
                         if (startLine < 1 || startLine > rows.length) {
-                            speak(`ไม่มีบรรทัดที่ ${startLine}`);
+                            speak(`ไม่มีบรรทัดที่ ${startLine}`, true);
                             return;
                         }
 
                         countLines = Math.min(countLines, rows.length - startLine + 1);
                         if (countLines <= 0) {
-                            speak("จำนวนบรรทัดไม่ถูกต้อง");
+                            speak("จำนวนบรรทัดไม่ถูกต้อง", true);
                             return;
                         }
 
                         startReadingSequence(rows, startLine, countLines);
                     } else {
-                        speak("ไม่มีข้อมูลให้อ่าน");
+                        speak("ไม่มีข้อมูลให้อ่าน", true);
                     }
                 }
             }
@@ -1323,7 +1404,18 @@ async function handleVoiceCommand(transcript) {
     const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isToggleBaseMap && !isShowDetails && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
 
     if (isSurvey) {
-        const job = findJobById(selectedJobId);
+        let job = null;
+        if (userMarker) {
+            job = findJobContainingUser();
+        }
+        if (!job) {
+            job = findJobById(selectedJobId);
+        } else {
+            if (selectedJobId !== job.id) {
+                openSheet(job);
+            }
+        }
+
         if (job) {
             const sheet = document.getElementById('sheet');
             if (sheet) { sheet.classList.remove('minimized'); sheet.classList.add('active'); }
@@ -1458,7 +1550,7 @@ async function routeToNextPoint() {
         speak("จีพีเอสไม่พร้อมใช้งาน");
         return Swal.fire('รอ GPS', '', 'info');
     }
-    const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating');
+    const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating' && j.id !== selectedJobId);
     if (filteredJobs.length === 0) {
         speak("ไม่มีงานค้างแล้ว");
         return Swal.fire('ยอดเยี่ยม', 'ไม่มีงานค้างในพื้นที่นี้', 'success');
@@ -1466,10 +1558,14 @@ async function routeToNextPoint() {
     let min = Infinity, near = null;
     const u = userMarker.getLatLng();
     filteredJobs.forEach(j => {
-        const d = map.distance(u, [j.lat, j.lng]);
-        if (d < min) {
-            min = d;
-            near = j;
+        const lat = Number(j.lat);
+        const lng = Number(j.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+            const d = map.distance(u, L.latLng(lat, lng));
+            if (d < min) {
+                min = d;
+                near = j;
+            }
         }
     });
     if (near) {
@@ -1883,6 +1979,14 @@ function togglePMEnabledSetting(enabled) {
 }
 window.togglePMEnabledSetting = togglePMEnabledSetting;
 
+function toggleSpeechEnableSetting(enabled) {
+    localStorage.setItem('survey_speech_enabled', enabled ? 'true' : 'false');
+    isSpeechEnabled = enabled;
+    const chk = document.getElementById('chk-enable-speech');
+    if (chk) chk.checked = enabled;
+}
+window.toggleSpeechEnableSetting = toggleSpeechEnableSetting;
+
 function showPendingActionsBar() {
     const bar = document.getElementById('pending-actions-bar');
     if (!bar) return;
@@ -2277,7 +2381,8 @@ function renderMap(fitBounds = false) {
     updateCounter();
 }
 
-function speak(text) {
+function speak(text, force = false) {
+    if (!isSpeechEnabled && !force) return;
     if ('speechSynthesis' in window) {
         const u = new SpeechSynthesisUtterance(text);
         u.lang = 'th-TH';
@@ -2328,7 +2433,7 @@ async function startNav() {
     document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-map-pin"></i>';
 
     isNavigating = true;
-    job.prevStatus = job.status;
+    job.prevStatus = (job.status === 'navigating') ? 'waiting' : job.status;
     job.status = 'navigating';
     if (!job.properties) job.properties = {};
     job.properties.navigator_id = currentUser.id;
@@ -2403,7 +2508,7 @@ async function startNav() {
     } catch (e) { }
 }
 
-async function stopNav() {
+async function stopNav(skipDbSaveForJobId = null) {
     isNavigating = false;
     if (routingControl) {
         try { map.removeControl(routingControl); } catch (e) { }
@@ -2412,9 +2517,33 @@ async function stopNav() {
     if (navInterval) clearInterval(navInterval);
     document.getElementById('btn-nav-start').classList.remove('hidden');
     document.getElementById('btn-nav-cancel').classList.add('hidden');
+
+    // Fail-safe sweep for all jobs in local memory
+    if (currentUser) {
+        const promises = [];
+        dbJobs.forEach(j => {
+            if (j.status === 'navigating' && j.properties && j.properties.navigator_id === currentUser.id) {
+                if (skipDbSaveForJobId && j.id === skipDbSaveForJobId) {
+                    return;
+                }
+                j.status = 'waiting';
+                j.properties.navigator_id = null;
+                j.properties.navigator_name = null;
+                promises.push(saveJobToSupabase(j).catch(err => console.error("Failed to save reset state for job " + j.id, err)));
+            }
+        });
+        if (promises.length > 0) {
+            await Promise.all(promises);
+        }
+    }
+
     const job = findJobById(selectedJobId);
-    if (job) {
-        job.status = job.prevStatus || 'waiting';
+    if (job && (!skipDbSaveForJobId || job.id !== skipDbSaveForJobId)) {
+        let targetStatus = job.prevStatus || 'waiting';
+        if (targetStatus === 'navigating') {
+            targetStatus = 'waiting';
+        }
+        job.status = targetStatus;
         if (!job.properties) job.properties = {};
         job.properties.navigator_id = null;
         job.properties.navigator_name = null;
@@ -2692,21 +2821,41 @@ function toggleSheetSize() {
     document.getElementById('sheet').classList.toggle('minimized');
 }
 
-function findNearestNewJob() {
+async function findNearestNewJob() {
     if (!userMarker) return Swal.fire('รอ GPS', '', 'info');
-    const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating');
+
+    if (isNavigating) {
+        const result = await Swal.fire({
+            title: 'ยกเลิกเส้นทางเดิม?',
+            text: 'คุณกำลังนำทางอยู่ ต้องการยกเลิกเส้นทางเดิมเพื่อค้นหาและนำทางไปยังแปลงที่อยู่ใกล้ที่สุดใหม่หรือไม่?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            confirmButtonText: 'ยกเลิกเส้นทางเดิม',
+            cancelButtonText: 'นำทางต่อ',
+            allowOutsideClick: false
+        });
+        if (!result.isConfirmed) {
+            return;
+        }
+        await stopNav();
+    }
+
+    const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating' && j.id !== selectedJobId);
     if (filteredJobs.length === 0) return Swal.fire('ยอดเยี่ยม', 'ไม่มีงานค้างในพื้นที่นี้', 'success');
     let min = Infinity, near = null;
     const u = userMarker.getLatLng();
     filteredJobs.forEach(j => {
-        const d = map.distance(u, [j.lat, j.lng]);
-        if (d < min) { min = d; near = j; }
+        const lat = Number(j.lat);
+        const lng = Number(j.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+            const d = map.distance(u, L.latLng(lat, lng));
+            if (d < min) { min = d; near = j; }
+        }
     });
     if (near) {
         openSheet(near);
-        document.getElementById('sheet').classList.add('minimized');
-        map.fitBounds(L.latLngBounds([u, [near.lat, near.lng]]), { padding: [80, 80] });
-        Swal.fire({ toast: true, icon: 'success', title: 'งานถัดไป', text: Math.round(min) + ' ม.', timer: 1500, showConfirmButton: false });
+        await startNav();
     }
 }
 
@@ -3141,7 +3290,7 @@ async function saveData() {
     const job = findJobById(selectedJobId);
     if (!job) return;
 
-    if (isNavigating) await stopNav();
+    if (isNavigating) await stopNav(selectedJobId);
 
     showLoading(true, 'กำลังอัปโหลดรูปภาพและบันทึกข้อมูล...');
     try {
@@ -3189,6 +3338,7 @@ async function saveData() {
         const isTemp = job.properties && job.properties.is_temp === true;
         const nameVal = document.getElementById('sheet-name').value;
         const noteVal = document.getElementById('sheet-note').value;
+        const hasNote = noteVal && noteVal.trim() !== "";
 
         if (isTemp) {
             // Generate a permanent ID
@@ -3201,12 +3351,12 @@ async function saveData() {
                 lat: job.lat,
                 lng: job.lng,
                 geometry: job.geometry,
-                status: 'done',
+                status: hasNote ? 'done' : 'waiting',
                 category: currentUser.category,
                 properties: {
                     name: nameVal || `แปลงวาดใหม่`,
                     note: noteVal || '',
-                    date: new Date().toISOString().split('T')[0],
+                    date: hasNote ? new Date().toISOString().split('T')[0] : '',
                     is_custom_draw: true,
                     navigator_id: null,
                     navigator_name: null,
@@ -3244,12 +3394,13 @@ async function saveData() {
             closeSheet();
             showPendingActionsBar();
         } else {
-            job.status = 'done';
+            job.status = hasNote ? 'done' : 'waiting';
             job.properties.name = nameVal;
             job.properties.note = noteVal;
-            job.properties.date = new Date().toISOString().split('T')[0];
+            job.properties.date = hasNote ? new Date().toISOString().split('T')[0] : '';
             job.properties.navigator_id = null;
             job.properties.navigator_name = null;
+            job.updated_at = new Date().toISOString();
 
             await saveJobToSupabase(job);
 

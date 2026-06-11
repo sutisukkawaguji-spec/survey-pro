@@ -1354,6 +1354,18 @@
                         </label>
                     </div>
 
+                    <!-- เปิด/ปิดเสียงพูดนำทางและแจ้งเตือน -->
+                    <div class="p-4 border border-gray-200 rounded-2xl flex items-center justify-between bg-gray-50/50">
+                        <div>
+                            <label class="text-xs font-bold text-gray-700 block">เปิดเสียงพูดระบบ (Enable Speech)</label>
+                            <span class="text-[9px] text-gray-500 block leading-normal">เปิดเสียงพูดนำทางและแจ้งเตือนการทำงานต่างๆ (ปิดก็ยังใช้คำสั่งให้อ่านรายละเอียดได้)</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="chk-enable-speech" class="sr-only peer" onchange="toggleSpeechEnableSetting(this.checked)">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
                     <!-- ประเภทงาน / โครงการที่กำลังสำรวจ -->
                     <div class="p-4 border border-gray-200 rounded-2xl space-y-3 bg-gray-50/50">
                         <label class="text-xs font-bold text-gray-700 block">ประเภทงาน / โครงการที่กำลังสำรวจ</label>
@@ -1705,7 +1717,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=1.0.17" charset="UTF-8"></script>
+    <script src="app.js?v=1.0.25" charset="UTF-8"></script>
 </body>
 
 </html>
