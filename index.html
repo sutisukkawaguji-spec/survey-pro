@@ -1023,6 +1023,10 @@
                 class="fa-solid fa-gear"></i></button>
         <button class="btn-fab bg-blue-500 text-white" onclick="findNearestNewJob()"><i
                 class="fa-solid fa-crosshairs"></i></button>
+        <button id="btn-voice" class="btn-fab bg-white text-gray-400 transition-all duration-300" onclick="toggleVoiceControl()"
+            title="เปิด/ปิดการสั่งงานด้วยเสียง">
+            <i class="fa-solid fa-microphone-slash"></i>
+        </button>
         <button id="btn-gps" class="btn-fab bg-white text-blue-600" onclick="toggleGPSFollow()">
             <i class="fa-solid fa-location-arrow"></i>
         </button>
@@ -1292,6 +1296,9 @@
                 <button onclick="switchSettingsTab('geojson')" id="stab-geojson" class="tab-btn flex-1">
                     <i class="fa-solid fa-globe mr-1"></i> ลิงก์ GeoJSON
                 </button>
+                <button onclick="switchSettingsTab('voice')" id="stab-voice" class="tab-btn flex-1">
+                    <i class="fa-solid fa-microphone mr-1"></i> คำสั่งเสียง
+                </button>
             </div>
 
             <!-- Modal Body Content -->
@@ -1449,6 +1456,59 @@
                                     <i class="fa-solid fa-file-import mr-1"></i> เลือกไฟล์
                                 </button>
                             </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Voice Commands Manual -->
+                <div id="scontent-voice" class="tab-content hidden space-y-4">
+                    <div class="p-4 border border-blue-100 rounded-2xl bg-blue-50/20">
+                        <div class="text-xs font-bold text-blue-800 mb-2 flex items-center gap-1">
+                            <i class="fa-solid fa-circle-info"></i> คู่มือการสั่งการด้วยเสียง (Voice Commands)
+                        </div>
+                        <p class="text-[11px] text-gray-650 leading-relaxed">
+                            คุณสามารถสั่งการระบบด้วยเสียงภาษาไทยหรือภาษาอังกฤษผ่านปุ่มไมโครโฟน โดยมีรายการคำสั่งดังต่อไปนี้
+                        </p>
+                    </div>
+
+                    <div class="space-y-3.5">
+                        <div class="border-b pb-2.5">
+                            <span class="text-xs font-bold text-gray-800 block">🎤 จัดการเสียง & สแตนด์บาย</span>
+                            <ul class="list-disc pl-4 text-[10px] text-gray-600 space-y-1 mt-1">
+                                <li><b>"ปิดไมค์" / "ปิดไม" / "mute mic"</b>: ปิดไมโครโฟนชั่วคราว (ปุ่มจะเป็นสีส้ม)</li>
+                                <li><b>"เปิดไมค์" / "เปิดไม" / "unmute mic"</b>: เปิดไมโครโฟนใช้งานอีกครั้ง</li>
+                            </ul>
+                        </div>
+
+                        <div class="border-b pb-2.5">
+                            <span class="text-xs font-bold text-gray-800 block">📝 การบันทึกข้อมูลแปลง</span>
+                            <ul class="list-disc pl-4 text-[10px] text-gray-600 space-y-1 mt-1">
+                                <li><b>"สำรวจ" / "เปิดบันทึก" / "survey"</b>: เปิดกล่องบันทึกข้อมูลแปลงที่ดินที่เลือก</li>
+                                <li><b>"บันทึก" / "เซฟ เซอร์เวย์" / "save survey"</b>: บันทึกข้อมูลที่กรอกลงระบบ</li>
+                                <li><b>"ปิดกล่อง" / "ปิดรายละเอียด" / "close sheet"</b>: ปิดหน้าต่างบันทึกข้อมูล</li>
+                                <li><b>"ลบการบันทึก" / "ลบบันทึก" / "delete survey"</b>: ลบข้อมูลผลการสำรวจและคืนค่าสถานะ (แปลงที่ดินยังอยู่บนแผนที่)</li>
+                                <li><b>"ลบข้อความ" / "เคลียร์โน้ต" / "clear note"</b>: ล้างข้อความทั้งหมดในหมายเหตุหรือช่องค้นหา</li>
+                            </ul>
+                        </div>
+
+                        <div class="border-b pb-2.5">
+                            <span class="text-xs font-bold text-gray-800 block">🗺️ ค้นหาและนำทาง</span>
+                            <ul class="list-disc pl-4 text-[10px] text-gray-600 space-y-1 mt-1">
+                                <li><b>"ค้นหา" / "ช่องค้นหา" / "search"</b>: โฟกัสไปที่ช่องค้นหา และสามารถพูดคำที่ต้องการค้นหาต่อเพื่อพิมพ์ได้ทันที</li>
+                                <li><b>"รายการที่ [1-10] เดินทาง"</b>: เลือกรายการในผลลัพธ์การค้นหาตามลำดับ และเริ่มนำทางไปที่แปลงนั้นทันที</li>
+                                <li><b>"แปลงถัดไป" / "จุดถัดไป" / "next point"</b>: นำทางไปยังแปลงสำรวจถัดไปที่อยู่ใกล้ที่สุด</li>
+                                <li><b>"ยกเลิกการนำทาง" / "หยุดนำทาง" / "cancel route"</b>: หยุดการนำทางในปัจจุบัน</li>
+                            </ul>
+                        </div>
+
+                        <div>
+                            <span class="text-xs font-bold text-gray-800 block">🖼️ การแสดงผลแผนที่</span>
+                            <ul class="list-disc pl-4 text-[10px] text-gray-600 space-y-1 mt-1">
+                                <li><b>"เปิดป้าย" / "เปิดป้ายชื่อ"</b>: แสดงป้ายชื่อหมุดบนแผนที่</li>
+                                <li><b>"ปิดป้าย" / "ปิดป้ายชื่อ"</b>: ซ่อนป้ายชื่อหมุดบนแผนที่</li>
+                                <li><b>"แสดงแปลง" / "แสดงรูปแปลง" / "plot mode"</b>: สลับโหมดแผนที่เป้นแสดงรูปแปลงขอบเขตที่ดิน</li>
+                                <li><b>"แสดงหมุด" / "ปักหมุด" / "สั่งแสดงหมุด" / "แสดงหมุดแผนที่" / "pin mode"</b>: สลับโหมดแผนที่เป้นโหมดหมุดแผนที่</li>
+                            </ul>
                         </div>
                     </div>
                 </div>
@@ -1641,7 +1701,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=1.0.10" charset="UTF-8"></script>
+    <script src="app.js?v=1.0.11" charset="UTF-8"></script>
 </body>
 
 </html>

@@ -430,6 +430,7 @@ let map, userMarker, routingControl;
 let dbJobs = [], markersGroup;
 let selectedJobId = null, currentUser = { name: 'ผู้ใช้ทั่วไป', category: 'ทั่วไป' }, categories = ['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน'];
 let viewMode = 'original', isNavigating = false, isFollowing = false;
+let recognition = null, isVoiceActive = false, isVoiceMuted = false;
 let speechSynth = window.speechSynthesis;
 let navInterval = null;
 let markerJustClicked = false;
@@ -1012,7 +1013,6 @@ function updateCounter() {
     const doneCount = catJobs.filter(j => j.status === 'done').length;
     document.getElementById('job-counter').innerText = `${doneCount}/${catJobs.length}`;
 }
-
 function toggleGPSFollow(state) {
     isFollowing = (state !== undefined) ? state : !isFollowing;
     const btn = document.getElementById('btn-gps');
@@ -1026,6 +1026,382 @@ function toggleGPSFollow(state) {
         }
     } else {
         btn.classList.remove('active-gps');
+    }
+}
+
+function initVoiceRecognition() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return false;
+
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.lang = 'th-TH';
+
+    recognition.onstart = () => {
+        isVoiceActive = true;
+        updateVoiceControlUI(isVoiceMuted ? 'muted' : true);
+    };
+    recognition.onend = () => {
+        if (isVoiceActive) {
+            try { recognition.start(); } catch (e) { console.error("Speech Recognition restart failed:", e); }
+        } else {
+            updateVoiceControlUI(false);
+        }
+    };
+    recognition.onerror = (event) => {
+        console.error("Speech Recognition error:", event.error);
+        if (event.error === 'not-allowed') {
+            isVoiceActive = false;
+            updateVoiceControlUI(false);
+            Swal.fire('การสั่งการด้วยเสียง', 'สิทธิ์ไมโครโฟนถูกปฏิเสธ กรุณาอนุญาตให้ใช้งานไมโครโฟน', 'warning');
+        }
+    };
+    recognition.onresult = (event) => {
+        const resultIndex = event.resultIndex;
+        const transcript = event.results[resultIndex][0].transcript.toLowerCase().trim();
+        console.log("Speech recognized: ", transcript);
+        handleVoiceCommand(transcript);
+    };
+    return true;
+}
+
+async function handleVoiceCommand(transcript) {
+    const cleanTranscript = transcript.replace(/\s+/g, '');
+
+    const isUnmute = cleanTranscript.includes("unmutemic") || cleanTranscript.includes("unmutevoice") || cleanTranscript.includes("เปิดไมค์") || cleanTranscript.includes("เปิดไม");
+    if (isVoiceMuted) {
+        if (isUnmute) {
+            isVoiceMuted = false;
+            updateVoiceControlUI(true);
+            speak("เปิดไมค์");
+        }
+        return;
+    }
+
+    const isMute = !cleanTranscript.includes("เปิด") && !cleanTranscript.includes("open") && (
+                   cleanTranscript.includes("mutemic") || cleanTranscript.includes("mutevoice") || cleanTranscript.includes("standbyvoice") || cleanTranscript.includes("ปิดไมค์") || cleanTranscript.includes("ปิดไม")
+    );
+    if (isMute) {
+        isVoiceMuted = true;
+        updateVoiceControlUI('muted');
+        speak("ปิดไมค์");
+        return;
+    }
+
+    if (window.Swal && Swal.isVisible()) {
+        const isConfirm = cleanTranscript.includes("ตกลง") || cleanTranscript.includes("ยืนยัน") || cleanTranscript.includes("เอาเลย") || cleanTranscript.includes("ลบเลย") || cleanTranscript.includes("ใช่") || cleanTranscript.includes("ok") || cleanTranscript.includes("confirm");
+        const isCancel = cleanTranscript.includes("ยกเลิก") || cleanTranscript.includes("ไม่ลบ") || cleanTranscript.includes("ไม่") || cleanTranscript.includes("cancel") || cleanTranscript.includes("close") || cleanTranscript.includes("ปิด");
+        if (isConfirm) {
+            Swal.clickConfirm();
+            speak("ตกลง");
+        } else if (isCancel) {
+            Swal.clickCancel();
+            speak("ยกเลิก");
+        }
+        return;
+    }
+
+    const isSave = cleanTranscript.includes("savesurvey") || cleanTranscript.includes("เซฟเซอร์เวย์") || cleanTranscript.includes("เซฟเซอเวย์") || cleanTranscript.includes("บันทึกข้อมูล") || 
+                   (cleanTranscript.includes("บันทึก") && !cleanTranscript.includes("เปิดบันทึก") && !cleanTranscript.includes("ปิดบันทึก") && !cleanTranscript.includes("ปิดกล่องบันทึก") && !cleanTranscript.includes("ลบบันทึก") && !cleanTranscript.includes("ลบการบันทึก"));
+
+    const isNext = cleanTranscript.includes("nextpoint") || cleanTranscript.includes("nexpoint") || cleanTranscript.includes("แปลงถัดไป") || cleanTranscript.includes("จุดถัดไป") || cleanTranscript.includes("เน็กพอยต์") || cleanTranscript.includes("เน็กซ์พอยต์");
+    const isCancelNav = cleanTranscript.includes("cancelnavigation") || cleanTranscript.includes("stopnavigation") || cleanTranscript.includes("cancelroute") || cleanTranscript.includes("ยกเลิกการนำทาง") || cleanTranscript.includes("ยกเลิกนำทาง") || cleanTranscript.includes("หยุดนำทาง");
+    const isDeleteSurvey = cleanTranscript.includes("deletesurvey") || cleanTranscript.includes("deleterecord") || cleanTranscript.includes("ลบการบันทึก") || cleanTranscript.includes("ลบบันทึก") || cleanTranscript.includes("ลบข้อมูลสำรวจ");
+
+    const isShowLabels = cleanTranscript.includes("showlabel") || cleanTranscript.includes("showlabels") || cleanTranscript.includes("openlabel") || cleanTranscript.includes("openlabels") || cleanTranscript.includes("turnonlabel") || cleanTranscript.includes("turnonlabels") || cleanTranscript.includes("เปิดป้ายชื่อ") || cleanTranscript.includes("แสดงป้ายชื่อ") || cleanTranscript.includes("เปิดป้าย") || cleanTranscript.includes("แสดงป้าย");
+    const isHideLabels = !cleanTranscript.includes("เปิด") && !cleanTranscript.includes("open") && (cleanTranscript.includes("hidelabel") || cleanTranscript.includes("hidelabels") || cleanTranscript.includes("closelabel") || cleanTranscript.includes("closelabels") || cleanTranscript.includes("turnofflabel") || cleanTranscript.includes("turnofflabels") || cleanTranscript.includes("ปิดป้ายชื่อ") || cleanTranscript.includes("ซ่อนป้ายชื่อ") || cleanTranscript.includes("ปิดป้าย") || cleanTranscript.includes("ซ่อนป้าย"));
+
+    const isShowPlot = cleanTranscript.includes("showplot") || cleanTranscript.includes("showplots") || cleanTranscript.includes("showboundary") || cleanTranscript.includes("showboundaries") || cleanTranscript.includes("plotmode") || cleanTranscript.includes("แสดงรูปแปลง") || cleanTranscript.includes("แสดงขอบเขตแปลง") || cleanTranscript.includes("แสดงแปลง") || cleanTranscript.includes("โหมดแปลง");
+    const isShowPin = cleanTranscript.includes("showpin") || cleanTranscript.includes("showpins") || cleanTranscript.includes("showmarker") || cleanTranscript.includes("showmarkers") || cleanTranscript.includes("pinmode") || cleanTranscript.includes("แสดงหมุด") || cleanTranscript.includes("โหมดหมุด") || cleanTranscript.includes("ปักหมุด") || cleanTranscript.includes("สั่งแสดงหมุด") || cleanTranscript.includes("แสดงหมุดแผนที่");
+
+    const isClearNote = cleanTranscript.includes("clearnote") || cleanTranscript.includes("clearnotes") || cleanTranscript.includes("clearalltext") || cleanTranscript.includes("cleartext") || cleanTranscript.includes("ลบข้อความทั้งหมด") || cleanTranscript.includes("ลบหมายเหตุทั้งหมด") || cleanTranscript.includes("ลบข้อความ") || cleanTranscript.includes("ลบหมายเหตุ") || cleanTranscript.includes("ลบทั้งหมด") || cleanTranscript.includes("ล้างข้อความทั้งหมด") || cleanTranscript.includes("ล้างข้อความ") || cleanTranscript.includes("เคลียร์ข้อความทั้งหมด") || cleanTranscript.includes("เคลียร์ข้อความ") || cleanTranscript.includes("เคลียร์โน้ต") || cleanTranscript.includes("ลบโน้ต");
+    const isCloseSheet = !cleanTranscript.includes("เปิด") && !cleanTranscript.includes("open") && (cleanTranscript.includes("closesheet") || cleanTranscript.includes("closedetails") || cleanTranscript.includes("closedetail") || cleanTranscript.includes("closebox") || cleanTranscript.includes("closewindow") || cleanTranscript.includes("cancel") || cleanTranscript.includes("ปิดบันทึก") || cleanTranscript.includes("ปิดกล่องบันทึก") || cleanTranscript.includes("ปิดกล่อง") || cleanTranscript.includes("ปิดรายละเอียด") || cleanTranscript.includes("ปิดหน้าต่าง") || cleanTranscript.includes("ยกเลิกบันทึก") || cleanTranscript.includes("ยกเลิกรายละเอียด") || (cleanTranscript.includes("ปิด") && !cleanTranscript.includes("ปิดป้ายชื่อ") && !cleanTranscript.includes("ปิดป้าย") && !cleanTranscript.includes("ปิดระบบ")) || (cleanTranscript.includes("ยกเลิก") && !cleanTranscript.includes("ยกเลิกการนำทาง") && !cleanTranscript.includes("ยกเลิกนำทาง")));
+    const isFocusSearch = !cleanTranscript.includes("ลบ") && !cleanTranscript.includes("ล้าง") && (cleanTranscript.includes("ค้นหา") || cleanTranscript.includes("ช่องค้นหา") || cleanTranscript.includes("เปิดค้นหา") || cleanTranscript.includes("search"));
+    const isNavigateSearchItem = (cleanTranscript.includes("รายการที่") || cleanTranscript.includes("รายการ")) && cleanTranscript.includes("เดินทาง");
+
+    const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
+
+    if (isSurvey) {
+        const job = findJobById(selectedJobId);
+        if (job) {
+            const sheet = document.getElementById('sheet');
+            if (sheet) { sheet.classList.remove('minimized'); sheet.classList.add('active'); }
+            const noteInput = document.getElementById('sheet-note');
+            if (noteInput) {
+                if (noteInput.disabled) enableEdit();
+                noteInput.focus();
+                noteInput.selectionStart = noteInput.selectionEnd = noteInput.value.length;
+            }
+            speak("เปิดกล่องบันทึกข้อมูล พร้อมบันทึกหมายเหตุ");
+        } else {
+            speak("กรุณาเลือกแปลงที่ดินก่อน");
+        }
+    } else if (isSave) {
+        const job = findJobById(selectedJobId);
+        if (job) {
+            const btnSave = document.getElementById('btn-save');
+            if (btnSave && !btnSave.classList.contains('hidden')) { speak("บันทึกข้อมูลเรียบร้อย"); saveData(); } else speak("ไม่สามารถบันทึกได้ในโหมดนี้");
+        } else {
+            speak("ไม่มีข้อมูลให้บันทึก");
+        }
+    } else if (isCloseSheet) {
+        if (selectedJobId) { speak("ปิดกล่องบันทึกข้อมูล"); closeSheet(); } else speak("ไม่มีกล่องบันทึกเปิดอยู่");
+    } else if (isNext) {
+        await routeToNextPoint();
+    } else if (isCancelNav) {
+        if (isNavigating) { speak("ยกเลิกการนำทางเรียบร้อย"); await stopNav(); } else speak("ไม่ได้อยู่ในโหมดนำทาง");
+    } else if (isDeleteSurvey) {
+        const job = findJobById(selectedJobId);
+        if (job) { speak("เปิดกล่องข้อยืนยันการลบ"); await deleteSurveyData(); } else speak("กรุณาเลือกแปลงที่ดินที่ต้องการลบข้อมูลก่อน");
+    } else if (isClearNote) {
+        const noteInput = document.getElementById('sheet-note');
+        const searchInput = document.getElementById('inp-search');
+        if (searchInput && document.activeElement === searchInput) {
+            searchInput.value = '';
+            doSearch();
+            speak("ลบข้อความ");
+        } else if (noteInput && !noteInput.disabled) {
+            speak("คุณต้องการลบข้อความทั้งหมดใช่หรือไม่");
+            const confirm = await Swal.fire({
+                title: 'ลบข้อความทั้งหมด?', text: 'คุณต้องการลบข้อความหมายเหตุทั้งหมดใช่หรือไม่?', icon: 'warning', showCancelButton: true, confirmButtonColor: '#ef4444', confirmButtonText: 'ลบทั้งหมด', cancelButtonText: 'ยกเลิก'
+            });
+            if (confirm.isConfirmed) {
+                noteInput.value = '';
+                noteInput.dispatchEvent(new Event('input'));
+                noteInput.focus();
+                speak("ลบข้อความทั้งหมดเรียบร้อย");
+            } else { speak("ยกเลิกการลบข้อความ"); }
+        } else { speak("ไม่มีกล่องข้อความให้ลบ"); }
+    } else if (isShowLabels) {
+        if (!showPinLabels) togglePinLabels();
+        speak("เปิดป้าย");
+    } else if (isHideLabels) {
+        if (showPinLabels) togglePinLabels();
+        speak("ปิดป้าย");
+    } else if (isShowPlot) {
+        if (viewMode !== 'original') { viewMode = 'original'; document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-draw-polygon"></i>'; renderMap(); speak("แสดงขอบเขตแปลงที่ดิน"); } else speak("แสดงขอบเขตแปลงอยู่แล้ว");
+    } else if (isShowPin) {
+        if (viewMode !== 'pin') { viewMode = 'pin'; document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-map-pin"></i>'; renderMap(); speak("แสดงหมุด"); } else speak("แสดงหมุดอยู่แล้ว");
+    } else if (isFocusSearch) {
+        const searchInput = document.getElementById('inp-search');
+        if (searchInput) { searchInput.focus(); searchInput.select(); speak("ค้นหา"); }
+    } else if (isNavigateSearchItem) {
+        let targetIndex = -1;
+        if (cleanTranscript.includes("หนึ่ง") || cleanTranscript.includes("1")) targetIndex = 0;
+        else if (cleanTranscript.includes("สอง") || cleanTranscript.includes("2")) targetIndex = 1;
+        else if (cleanTranscript.includes("สาม") || cleanTranscript.includes("3")) targetIndex = 2;
+        else if (cleanTranscript.includes("สี่") || cleanTranscript.includes("4")) targetIndex = 3;
+        else if (cleanTranscript.includes("ห้า") || cleanTranscript.includes("5")) targetIndex = 4;
+        else if (cleanTranscript.includes("หก") || cleanTranscript.includes("6")) targetIndex = 5;
+        else if (cleanTranscript.includes("เจ็ด") || cleanTranscript.includes("7")) targetIndex = 6;
+        else if (cleanTranscript.includes("แปด") || cleanTranscript.includes("8")) targetIndex = 7;
+        else if (cleanTranscript.includes("เก้า") || cleanTranscript.includes("9")) targetIndex = 8;
+        else if (cleanTranscript.includes("สิบ") || cleanTranscript.includes("10")) targetIndex = 9;
+
+        if (targetIndex >= 0) {
+            const hits = getFilteredJobs();
+            if (hits && hits.length > targetIndex) {
+                const j = hits[targetIndex];
+                selectedJobId = j.id;
+                openSheet(j);
+                const resultsEl = document.getElementById('search-results');
+                if (resultsEl) resultsEl.classList.remove('active');
+                const searchInput = document.getElementById('inp-search');
+                if (searchInput) {
+                    searchInput.value = '';
+                    searchInput.blur();
+                }
+                speak(`เดินทางไปยังรายการที่ ${targetIndex + 1}`);
+                await startNav();
+            } else {
+                speak(`ไม่พบรายการที่ ${targetIndex + 1} ในผลการค้นหา`);
+            }
+        } else {
+            speak("กรุณาระบุลำดับรายการให้ถูกต้อง");
+        }
+    } else {
+        const noteInput = document.getElementById('sheet-note');
+        const searchInput = document.getElementById('inp-search');
+        const sheet = document.getElementById('sheet');
+        const isSheetActive = sheet && sheet.classList.contains('active') && !sheet.classList.contains('minimized');
+        if (searchInput && document.activeElement === searchInput) {
+            const startVal = searchInput.value.trim();
+            searchInput.value = startVal ? (startVal + " " + transcript) : transcript;
+            doSearch();
+            speak("ค้นหา " + transcript);
+        } else if (noteInput && !noteInput.disabled && (document.activeElement === noteInput || isSheetActive)) {
+            const startVal = noteInput.value.trim();
+            noteInput.value = startVal ? (startVal + " " + transcript) : transcript;
+            noteInput.dispatchEvent(new Event('input'));
+            speak("จดบันทึกเรียบร้อย");
+        }
+    }
+}
+
+async function routeToNextPoint() {
+    if (!userMarker) {
+        speak("จีพีเอสไม่พร้อมใช้งาน");
+        return Swal.fire('รอ GPS', '', 'info');
+    }
+    const filteredJobs = getFilteredJobs().filter(j => j.status !== 'done' && j.status !== 'navigating');
+    if (filteredJobs.length === 0) {
+        speak("ไม่มีงานค้างแล้ว");
+        return Swal.fire('ยอดเยี่ยม', 'ไม่มีงานค้างในพื้นที่นี้', 'success');
+    }
+    let min = Infinity, near = null;
+    const u = userMarker.getLatLng();
+    filteredJobs.forEach(j => {
+        const d = map.distance(u, [j.lat, j.lng]);
+        if (d < min) {
+            min = d;
+            near = j;
+        }
+    });
+    if (near) {
+        selectedJobId = near.id;
+        map.setView([near.lat, near.lng], Math.max(map.getZoom(), 16));
+        const sheet = document.getElementById('sheet');
+        if (sheet) {
+            sheet.classList.remove('minimized');
+            sheet.classList.add('active');
+        }
+        renderMap();
+        speak("กำลังนำทางไปยังจุดถัดไป");
+        startNav();
+    }
+}
+
+function toggleVoiceControl() {
+    if (!recognition) {
+        const success = initVoiceRecognition();
+        if (!success) {
+            Swal.fire('การสั่งการด้วยเสียง', 'ไม่รองรับ Web Speech API ในเบราว์เซอร์นี้', 'error');
+            return;
+        }
+    }
+
+    if (isVoiceActive) {
+        isVoiceActive = false;
+        isVoiceMuted = false;
+        try {
+            recognition.stop();
+        } catch (e) {}
+        speak("ปิดระบบสั่งงานด้วยเสียง");
+    } else {
+        isVoiceActive = true;
+        isVoiceMuted = false;
+        try {
+            recognition.start();
+            speak("เปิดระบบสั่งงานด้วยเสียง");
+        } catch (e) {
+            console.error("Speech Recognition start error:", e);
+            isVoiceActive = false;
+        }
+    }
+}
+
+function updateVoiceControlUI(active) {
+    const btn = document.getElementById('btn-voice');
+    if (!btn) return;
+    if (active === true) {
+        btn.classList.remove('bg-white', 'text-gray-400', 'bg-amber-500', 'border-amber-500');
+        btn.classList.add('bg-red-500', 'text-white', 'animate-pulse', 'border-red-500');
+        btn.innerHTML = '<i class="fa-solid fa-microphone"></i>';
+    } else if (active === 'muted') {
+        btn.classList.remove('bg-white', 'text-gray-400', 'bg-red-500', 'animate-pulse', 'border-red-500');
+        btn.classList.add('bg-amber-500', 'text-white', 'border-amber-500');
+        btn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+    } else {
+        btn.classList.remove('bg-red-500', 'bg-amber-500', 'text-white', 'animate-pulse', 'border-red-500', 'border-amber-500');
+        btn.classList.add('bg-white', 'text-gray-400');
+        btn.innerHTML = '<i class="fa-solid fa-microphone-slash"></i>';
+    }
+}
+
+async function deleteSurveyData() {
+    const job = findJobById(selectedJobId);
+    if (!job) return;
+
+    const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
+
+    let htmlContent = `
+        <div class="text-sm text-gray-600 text-left space-y-2">
+            <p>ระบบจะลบผลการสำรวจ (หมายเหตุ, รูปถ่าย, วันที่) และคืนค่าสถานะแปลงนี้ให้เป็น <b>"รอการตรวจสอบ"</b></p>
+            <p class="text-red-500 font-bold">* แปลงที่ดินจะยังคงแสดงอยู่บนแผนที่ตามปกติ</p>
+    `;
+
+    if (hasImages) {
+        htmlContent += `
+            <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2">
+                <input type="checkbox" id="swal-delete-cloud-images" class="w-4 h-4 rounded text-red-650 focus:ring-red-500 cursor-pointer">
+                <label for="swal-delete-cloud-images" class="text-xs font-bold text-gray-700 cursor-pointer select-none">
+                    ลบรูปภาพทั้งหมด (${job.properties.images.length} รูป) ออกจาก Cloudinary ด้วย
+                </label>
+            </div>
+        `;
+    }
+
+    htmlContent += `</div>`;
+
+    const result = await Swal.fire({
+        title: 'ลบข้อมูลการสำรวจ?',
+        html: htmlContent,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'ยืนยันการลบข้อมูลสำรวจ',
+        cancelButtonText: 'ยกเลิก',
+        preConfirm: () => {
+            const chk = document.getElementById('swal-delete-cloud-images');
+            return {
+                deleteFromCloud: chk ? chk.checked : false
+            };
+        }
+    });
+
+    if (result.isConfirmed) {
+        const deleteFromCloud = result.value.deleteFromCloud;
+
+        justDeletedJobId = job.id;
+        selectedJobId = null;
+        isMapClickBlocked = true;
+        closeSheet();
+
+        showLoading(true, 'กำลังลบผลการสำรวจ...');
+        try {
+            if (deleteFromCloud && hasImages) {
+                await Promise.all(job.properties.images.map(async (img) => {
+                    const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
+                    if (publicId) {
+                        try {
+                            await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
+                        } catch (err) {
+                            console.error("ลบ Cloudinary พลาด:", err);
+                        }
+                    }
+                }));
+            }
+
+            job.status = 'waiting';
+            job.properties.note = '';
+            job.properties.date = '';
+            job.properties.images = [];
+
+            await saveJobToSupabase(job);
+            renderMap();
+            showLoading(false);
+
+            await Swal.fire({ toast: true, icon: 'success', title: 'ลบผลการสำรวจและคืนค่าสถานะแล้ว', timer: 1500, showConfirmButton: false });
+        } catch (e) {
+            showLoading(false);
+            Swal.fire('ทำรายการไม่สำเร็จ', e.message, 'error');
+        } finally {
+            setTimeout(() => {
+                justDeletedJobId = null;
+                isMapClickBlocked = false;
+            }, 2000);
+        }
     }
 }
 
@@ -1768,9 +2144,17 @@ async function startNav() {
             show: false,
             addWaypoints: false
         }).addTo(map);
-        speak("เริ่มการนำทาง");
+        const initialDistance = map.distance(userMarker.getLatLng(), [job.lat, job.lng]);
+        let distText = "";
+        if (initialDistance >= 1000) {
+            distText = `ระยะทางประมาณ ${(initialDistance / 1000).toFixed(1)} กิโลเมตร`;
+        } else {
+            distText = `ระยะทางประมาณ ${Math.round(initialDistance)} เมตร`;
+        }
+        speak(`เริ่มการนำทาง ${distText}`);
 
         if (navInterval) clearInterval(navInterval);
+        let lastSpokenTime = Date.now();
         navInterval = setInterval(async () => {
             if (!userMarker) return;
             const d = map.distance(userMarker.getLatLng(), [job.lat, job.lng]);
@@ -1789,6 +2173,17 @@ async function startNav() {
                 document.getElementById('sheet').classList.remove('minimized');
                 document.getElementById('sheet').classList.add('active');
                 Swal.fire({ toast: true, icon: 'success', title: 'ถึงแล้ว!', text: 'กรอกข้อมูลได้เลย', timer: 2000, showConfirmButton: false });
+            } else {
+                // Periodically speak distance (every 30 seconds)
+                const now = Date.now();
+                if (now - lastSpokenTime >= 30000) {
+                    lastSpokenTime = now;
+                    if (d >= 1000) {
+                        speak(`เหลือระยะทางอีก ${(d / 1000).toFixed(1)} กิโลเมตร`);
+                    } else {
+                        speak(`เหลือระยะทางอีก ${Math.round(d)} เมตร`);
+                    }
+                }
             }
         }, 3000);
     } catch (e) { }
@@ -2761,136 +3156,16 @@ async function deleteJob() {
     }
 
     if (job.status === 'done') {
-        const hasImages = job.properties && job.properties.images && job.properties.images.length > 0;
-
-        let htmlContent = `
-                    <div class="text-sm text-gray-600 text-left space-y-2">
-                        <p>ระบบจะลบผลการสำรวจ (หมายเหตุ, รูปถ่าย, วันที่) และคืนค่าสถานะแปลงนี้ให้เป็น <b>"รอการตรวจสอบ"</b></p>
-                        <p class="text-red-500 font-bold">* แปลงที่ดินจะยังคงแสดงอยู่บนแผนที่ตามปกติ</p>
-                `;
-
-        if (hasImages) {
-            htmlContent += `
-                        <div class="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-xl flex items-center gap-2">
-                            <input type="checkbox" id="swal-delete-cloud-images" class="w-4 h-4 rounded text-red-650 focus:ring-red-500 cursor-pointer">
-                            <label for="swal-delete-cloud-images" class="text-xs font-bold text-gray-700 cursor-pointer select-none">
-                                ลบรูปภาพทั้งหมด (${job.properties.images.length} รูป) ออกจาก Cloudinary ด้วย
-                            </label>
-                        </div>
-                    `;
-        }
-
-        htmlContent += `</div>`;
-
-        const result = await Swal.fire({
-            title: 'ลบข้อมูลการสำรวจ?',
-            html: htmlContent,
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonColor: '#ef4444',
-            confirmButtonText: 'ยืนยันการลบข้อมูลสำรวจ',
-            cancelButtonText: 'ยกเลิก',
-            preConfirm: () => {
-                const chk = document.getElementById('swal-delete-cloud-images');
-                return {
-                    deleteFromCloud: chk ? chk.checked : false
-                };
-            }
-        });
-
-        if (result.isConfirmed) {
-            const deleteFromCloud = result.value.deleteFromCloud;
-
-            // ✅ ป้องกัน Ghost Box: ปิด Sheet, ล้าง ID และล็อกคลิก
-            justDeletedJobId = job.id;
-            selectedJobId = null;
-            isMapClickBlocked = true;
-            closeSheet();
-
-            showLoading(true, 'กำลังลบผลการสำรวจ...');
-            try {
-                if (deleteFromCloud && hasImages) {
-                    await Promise.all(job.properties.images.map(async (img) => {
-                        const publicId = img ? (img.public_id || getPublicIdFromUrl(typeof img === 'string' ? img : img.url)) : null;
-                        if (publicId) {
-                            try {
-                                await fetch(GAS_URL + "?publicId=" + encodeURIComponent(publicId), { mode: 'no-cors' });
-                            } catch (err) {
-                                console.error("ลบ Cloudinary พลาด:", err);
-                            }
-                        }
-                    }));
-                }
-
-                // 2. Clear survey properties and reset status to 'waiting'
-                job.status = 'waiting';
-                job.properties.note = '';
-                job.properties.date = '';
-                job.properties.images = [];
-
-                // 3. Save to Supabase
-                await saveJobToSupabase(job);
-
-                // 4. Render map (sheet already closed)
-                renderMap();
-                showLoading(false);
-
-                // 5. Show success toast (รอให้ปิดสนิทแล้วค่อยปล่อย justDeletedJobId)
-                await Swal.fire({ toast: true, icon: 'success', title: 'ลบผลการสำรวจและคืนค่าสถานะแล้ว', timer: 1500, showConfirmButton: false });
-            } catch (e) {
-                showLoading(false);
-                Swal.fire('ทำรายการไม่สำเร็จ', e.message, 'error');
-            } finally {
-                // ✅ ขยายเวลาให้ Swal Toast ปิดสนิทก่อนปล่อย ID
-                setTimeout(() => {
-                    justDeletedJobId = null;
-                    isMapClickBlocked = false;
-                }, 2000);
-            }
-        }
+        await deleteSurveyData();
     } else {
-        const jobIndex = dbJobs.findIndex(j => j.id === selectedJobId);
-        if (jobIndex === -1) return;
-
-        const confirm = await Swal.fire({
-            title: 'ยืนยันการลบ?',
-            text: "คุณต้องการลบรายการนี้ออกจากระบบถาวรใช่หรือไม่?",
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'ลบ',
-            cancelButtonText: 'ยกเลิก'
+        Swal.fire({
+            icon: 'error',
+            title: 'ไม่สามารถลบได้',
+            text: 'ไม่สามารถลบแปลงที่ดินที่นำเข้าออกจากระบบได้',
+            confirmButtonText: 'ตกลง',
+            confirmButtonColor: '#ef4444'
         });
-
-        if (confirm.isConfirmed) {
-            // ✅ ป้องกัน Ghost Box: ปิด Sheet, ล้าง ID และล็อกคลิก
-            justDeletedJobId = job.id;
-            selectedJobId = null;
-            isMapClickBlocked = true;
-            closeSheet();
-
-            showLoading(true, 'กำลังลบข้อมูล...');
-            try {
-                const { error } = await supabaseClient
-                    .from('jobs')
-                    .delete()
-                    .eq('id', job.id);
-
-                if (error) throw error;
-
-                dbJobs.splice(jobIndex, 1);
-                renderMap();
-                showLoading(false);
-                await Swal.fire('ลบสำเร็จ', 'รายการนี้ถูกลบแล้ว', 'success');
-            } catch (e) {
-                showLoading(false);
-                Swal.fire('ล้มเหลว', e.message, 'error');
-            } finally {
-                setTimeout(() => {
-                    justDeletedJobId = null;
-                    isMapClickBlocked = false;
-                }, 2000);
-            }
-        }
+        return;
     }
 }
 
@@ -2962,7 +3237,7 @@ function closeSettingsModal(e) {
 let activeSettingsTab = 'profile';
 function switchSettingsTab(tab) {
     activeSettingsTab = tab;
-    const tabs = ['profile', 'geojson'];
+    const tabs = ['profile', 'geojson', 'voice'];
     tabs.forEach(t => {
         const btn = document.getElementById(`stab-${t}`);
         const content = document.getElementById(`scontent-${t}`);
@@ -4391,4 +4666,6 @@ window.nextGalleryImage = nextGalleryImage;
 window.renderImportedMapsList = renderImportedMapsList;
 window.deleteImportedMap = deleteImportedMap;
 window.saveProfileCategory = saveProfileCategory;
+window.toggleVoiceControl = toggleVoiceControl;
+window.deleteSurveyData = deleteSurveyData;
 
