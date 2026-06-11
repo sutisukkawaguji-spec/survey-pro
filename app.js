@@ -428,7 +428,7 @@ async function clearAllSupabaseJobs() {
 // --- Global State Variables ---
 let map, userMarker, routingControl;
 let dbJobs = [], markersGroup;
-let selectedJobId = null, currentUser = { name: 'ผู้ใช้ทั่วไป', category: 'ทั่วไป' }, categories = ['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน'];
+let selectedJobId = null, lastSelectedJobId = null, currentUser = { name: 'ผู้ใช้ทั่วไป', category: 'ทั่วไป' }, categories = ['ทั่วไป', 'ตรวจสอบ', 'เร่งด่วน'];
 let viewMode = 'original', isNavigating = false, isFollowing = false;
 let recognition = null, isVoiceActive = false, isVoiceMuted = false;
 let speechSynth = window.speechSynthesis;
@@ -1066,6 +1066,103 @@ function initVoiceRecognition() {
     return true;
 }
 
+let activeUtterances = [];
+
+function parseNumber(text) {
+    if (!text) return null;
+    const digits = text.match(/\d+/);
+    if (digits) {
+        return parseInt(digits[0], 10);
+    }
+    const thaiWords = {
+        "หนึ่ง": 1, "สอง": 2, "สาม": 3, "สี่": 4, "ห้า": 5,
+        "หก": 6, "เจ็ด": 7, "แปด": 8, "เก้า": 9, "สิบ": 10,
+        "สิบเอ็ด": 11, "สิบสอง": 12, "สิบสาม": 13, "สิบสี่": 14,
+        "สิบห้า": 15, "สิบหก": 16, "สิบเจ็ด": 17, "สิบแปด": 18,
+        "สิบเก้า": 19, "ยี่สิบ": 20, "ยี่สิบเอ็ด": 21, "ยี่สิบสอง": 22,
+        "ยี่สิบสาม": 23, "ยี่สิบสี่": 24, "ยี่สิบห้า": 25, "ยี่สิบหก": 26,
+        "ยี่สิบเจ็ด": 27, "ยี่สิบแปด": 28, "ยี่สิบเก้า": 29, "สามสิบ": 30,
+        "สามสิบเอ็ด": 31, "สามสิบสอง": 32, "สามสิบสาม": 33, "สามสิบสี่": 34,
+        "สามสิบห้า": 35, "สามสิบหก": 36, "สามสิบเจ็ด": 37, "สามสิบแปด": 38,
+        "สามสิบเก้า": 39, "สี่สิบ": 40, "สี่สิบเอ็ด": 41, "สี่สิบสอง": 42,
+        "สี่สิบสาม": 43, "สี่สิบสี่": 44, "สี่สิบห้า": 45, "สี่สิบหก": 46,
+        "สี่สิบเจ็ด": 47, "สี่สิบแปด": 48, "สี่สิบเก้า": 49, "ห้าสิบ": 50
+    };
+    const sortedWords = Object.keys(thaiWords).sort((a, b) => b.length - a.length);
+    for (const word of sortedWords) {
+        if (text.includes(word)) {
+            return thaiWords[word];
+        }
+    }
+    return null;
+}
+
+function stopReadingSequence() {
+    activeUtterances = [];
+    if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+    }
+    const container = document.getElementById('swal-raw-data-container');
+    if (container) {
+        const trs = container.querySelectorAll('tr');
+        trs.forEach(tr => {
+            tr.classList.remove('bg-yellow-100', 'font-semibold');
+        });
+    }
+}
+
+function startReadingSequence(rows, startLine, countLines) {
+    stopReadingSequence();
+
+    const container = document.getElementById('swal-raw-data-container');
+    const trs = container ? container.querySelectorAll('tr') : [];
+
+    for (let i = 0; i < countLines; i++) {
+        const rowIndex = startLine - 1 + i;
+        if (rowIndex >= rows.length) break;
+        const row = rows[rowIndex];
+        const cleanKey = row.key.replace(/_/g, ' ');
+        const textToSpeak = `บรรทัดที่ ${rowIndex + 1}: ${cleanKey} คือ ${row.value}`;
+
+        const u = new SpeechSynthesisUtterance(textToSpeak);
+        u.lang = 'th-TH';
+
+        activeUtterances.push(u);
+
+        const trElement = trs[rowIndex];
+
+        u.onstart = () => {
+            trs.forEach(tr => tr.classList.remove('bg-yellow-100', 'font-semibold'));
+            if (trElement) {
+                trElement.classList.add('bg-yellow-100', 'font-semibold');
+                trElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        };
+
+        u.onend = () => {
+            if (trElement) {
+                trElement.classList.remove('bg-yellow-100', 'font-semibold');
+            }
+            const index = activeUtterances.indexOf(u);
+            if (index > -1) {
+                activeUtterances.splice(index, 1);
+            }
+        };
+
+        u.onerror = () => {
+            if (trElement) {
+                trElement.classList.remove('bg-yellow-100', 'font-semibold');
+            }
+            const index = activeUtterances.indexOf(u);
+            if (index > -1) {
+                activeUtterances.splice(index, 1);
+            }
+        };
+
+        window.speechSynthesis.speak(u);
+    }
+}
+
 async function handleVoiceCommand(transcript) {
     const cleanTranscript = transcript.replace(/\s+/g, '');
 
@@ -1090,6 +1187,107 @@ async function handleVoiceCommand(transcript) {
     }
 
     if (window.Swal && Swal.isVisible()) {
+        const isStopReading = cleanTranscript.includes("หยุดอ่าน") || cleanTranscript.includes("หยุดพูด") || (cleanTranscript === "หยุด" && document.getElementById('swal-raw-data-container'));
+        if (isStopReading) {
+            stopReadingSequence();
+            speak("หยุดอ่าน");
+            return;
+        }
+
+        const isReadDetails = cleanTranscript.includes("อ่านรายละเอียด") || cleanTranscript.includes("อ่านข้อมูลดิบ") || cleanTranscript.includes("อ่านข้อมูล") || cleanTranscript.includes("อ่านตาราง") || cleanTranscript.includes("อ่านทั้งหมด");
+        const isReadLine = cleanTranscript.includes("อ่านบรรทัดที่") || cleanTranscript.includes("อ่านตั้งแต่บรรทัดที่");
+
+        if (isReadDetails || isReadLine) {
+            const job = findJobById(selectedJobId || lastSelectedJobId);
+            if (job) {
+                const container = document.getElementById('swal-raw-data-container');
+                if (container) {
+                    const sortedKeys = Object.keys(job.properties).sort();
+                    const rows = [];
+                    sortedKeys.forEach(k => {
+                        if (k !== 'images' && k !== 'name' && k !== 'note' && k !== 'date' && k !== 'search_field' && k !== 'amphoe' && k !== 'tambon' && k !== 'area') {
+                            const val = typeof job.properties[k] === 'object' ? JSON.stringify(job.properties[k]) : job.properties[k];
+                            rows.push({ key: k, value: val !== undefined && val !== null ? val : '-' });
+                        }
+                    });
+
+                    if (rows.length > 0) {
+                        let startLine = 1;
+                        let countLines = rows.length;
+
+                        if (isReadLine) {
+                            const lineIdx = cleanTranscript.indexOf("บรรทัดที่");
+                            if (lineIdx !== -1) {
+                                const afterLine = cleanTranscript.substring(lineIdx + "บรรทัดที่".length);
+                                const parsedStart = parseNumber(afterLine);
+                                if (parsedStart !== null) {
+                                    startLine = parsedStart;
+                                }
+                            }
+
+                            const toIdx = cleanTranscript.indexOf("ถึง");
+                            if (toIdx !== -1) {
+                                const afterTo = cleanTranscript.substring(toIdx + "ถึง".length);
+                                const endLine = parseNumber(afterTo);
+                                if (endLine !== null && endLine >= startLine) {
+                                    countLines = endLine - startLine + 1;
+                                }
+                            } else {
+                                const countIdx = cleanTranscript.indexOf("จำนวน");
+                                if (countIdx !== -1) {
+                                    const afterCount = cleanTranscript.substring(countIdx + "จำนวน".length);
+                                    const parsedCount = parseNumber(afterCount);
+                                    if (parsedCount !== null) {
+                                        countLines = parsedCount;
+                                    }
+                                } else {
+                                    if (cleanTranscript.includes("อ่านตั้งแต่")) {
+                                        countLines = rows.length - startLine + 1;
+                                    } else {
+                                        countLines = 1;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (startLine < 1 || startLine > rows.length) {
+                            speak(`ไม่มีบรรทัดที่ ${startLine}`);
+                            return;
+                        }
+
+                        countLines = Math.min(countLines, rows.length - startLine + 1);
+                        if (countLines <= 0) {
+                            speak("จำนวนบรรทัดไม่ถูกต้อง");
+                            return;
+                        }
+
+                        startReadingSequence(rows, startLine, countLines);
+                    } else {
+                        speak("ไม่มีข้อมูลให้อ่าน");
+                    }
+                }
+            }
+            return;
+        }
+
+        const isScrollDown = cleanTranscript.includes("เลื่อนลง") || (cleanTranscript.includes("ลง") && !cleanTranscript.includes("ตกลง")) || cleanTranscript.includes("scrolldown");
+        const isScrollUp = cleanTranscript.includes("เลื่อนขึ้น") || cleanTranscript.includes("ขึ้น") || cleanTranscript.includes("scrollup");
+        if (isScrollDown) {
+            const container = document.getElementById('swal-raw-data-container');
+            if (container) {
+                container.scrollBy({ top: 200, behavior: 'smooth' });
+                speak("เลื่อนลง");
+                return;
+            }
+        } else if (isScrollUp) {
+            const container = document.getElementById('swal-raw-data-container');
+            if (container) {
+                container.scrollBy({ top: -200, behavior: 'smooth' });
+                speak("เลื่อนขึ้น");
+                return;
+            }
+        }
+
         const isConfirm = cleanTranscript.includes("ตกลง") || cleanTranscript.includes("ยืนยัน") || cleanTranscript.includes("เอาเลย") || cleanTranscript.includes("ลบเลย") || cleanTranscript.includes("ใช่") || cleanTranscript.includes("ok") || cleanTranscript.includes("confirm");
         const isCancel = cleanTranscript.includes("ยกเลิก") || cleanTranscript.includes("ไม่ลบ") || cleanTranscript.includes("ไม่") || cleanTranscript.includes("cancel") || cleanTranscript.includes("close") || cleanTranscript.includes("ปิด");
         if (isConfirm) {
@@ -1115,13 +1313,14 @@ async function handleVoiceCommand(transcript) {
     const isShowPlot = cleanTranscript.includes("showplot") || cleanTranscript.includes("showplots") || cleanTranscript.includes("showboundary") || cleanTranscript.includes("showboundaries") || cleanTranscript.includes("plotmode") || cleanTranscript.includes("แสดงรูปแปลง") || cleanTranscript.includes("แสดงขอบเขตแปลง") || cleanTranscript.includes("แสดงแปลง") || cleanTranscript.includes("โหมดแปลง");
     const isShowPin = cleanTranscript.includes("showpin") || cleanTranscript.includes("showpins") || cleanTranscript.includes("showmarker") || cleanTranscript.includes("showmarkers") || cleanTranscript.includes("pinmode") || cleanTranscript.includes("แสดงหมุด") || cleanTranscript.includes("โหมดหมุด") || cleanTranscript.includes("ปักหมุด") || cleanTranscript.includes("สั่งแสดงหมุด") || cleanTranscript.includes("แสดงหมุดแผนที่");
     const isToggleBaseMap = cleanTranscript.includes("switchmap") || cleanTranscript.includes("changemap") || cleanTranscript.includes("togglemap") || cleanTranscript.includes("switchbasemap") || cleanTranscript.includes("togglebasemap") || cleanTranscript.includes("สลับแผนที่") || cleanTranscript.includes("เปลี่ยนแผนที่") || cleanTranscript.includes("สลับแผนที่ฐาน") || cleanTranscript.includes("เปลี่ยนแผนที่ฐาน");
+    const isShowDetails = cleanTranscript.includes("showdetail") || cleanTranscript.includes("showdetails") || cleanTranscript.includes("opendetail") || cleanTranscript.includes("opendetails") || cleanTranscript.includes("ขอดูรายละเอียด") || cleanTranscript.includes("ของดูรายละเอียด") || cleanTranscript.includes("ดูรายละเอียด");
 
     const isClearNote = cleanTranscript.includes("clearnote") || cleanTranscript.includes("clearnotes") || cleanTranscript.includes("clearalltext") || cleanTranscript.includes("cleartext") || cleanTranscript.includes("ลบข้อความทั้งหมด") || cleanTranscript.includes("ลบหมายเหตุทั้งหมด") || cleanTranscript.includes("ลบข้อความ") || cleanTranscript.includes("ลบหมายเหตุ") || cleanTranscript.includes("ลบทั้งหมด") || cleanTranscript.includes("ล้างข้อความทั้งหมด") || cleanTranscript.includes("ล้างข้อความ") || cleanTranscript.includes("เคลียร์ข้อความทั้งหมด") || cleanTranscript.includes("เคลียร์ข้อความ") || cleanTranscript.includes("เคลียร์โน้ต") || cleanTranscript.includes("ลบโน้ต");
     const isCloseSheet = !cleanTranscript.includes("เปิด") && !cleanTranscript.includes("open") && (cleanTranscript.includes("closesheet") || cleanTranscript.includes("closedetails") || cleanTranscript.includes("closedetail") || cleanTranscript.includes("closebox") || cleanTranscript.includes("closewindow") || cleanTranscript.includes("cancel") || cleanTranscript.includes("ปิดบันทึก") || cleanTranscript.includes("ปิดกล่องบันทึก") || cleanTranscript.includes("ปิดกล่อง") || cleanTranscript.includes("ปิดรายละเอียด") || cleanTranscript.includes("ปิดหน้าต่าง") || cleanTranscript.includes("ยกเลิกบันทึก") || cleanTranscript.includes("ยกเลิกรายละเอียด") || (cleanTranscript.includes("ปิด") && !cleanTranscript.includes("ปิดป้ายชื่อ") && !cleanTranscript.includes("ปิดป้าย") && !cleanTranscript.includes("ปิดระบบ")) || (cleanTranscript.includes("ยกเลิก") && !cleanTranscript.includes("ยกเลิกการนำทาง") && !cleanTranscript.includes("ยกเลิกนำทาง")));
     const isFocusSearch = !cleanTranscript.includes("ลบ") && !cleanTranscript.includes("ล้าง") && (cleanTranscript.includes("ค้นหา") || cleanTranscript.includes("ช่องค้นหา") || cleanTranscript.includes("เปิดค้นหา") || cleanTranscript.includes("search"));
     const isNavigateSearchItem = (cleanTranscript.includes("รายการที่") || cleanTranscript.includes("รายการ")) && cleanTranscript.includes("เดินทาง");
 
-    const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isToggleBaseMap && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
+    const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isToggleBaseMap && !isShowDetails && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
 
     if (isSurvey) {
         const job = findJobById(selectedJobId);
@@ -1188,6 +1387,16 @@ async function handleVoiceCommand(transcript) {
         toggleBaseMap();
         const mapType = currentBaseMap === 'hybrid' ? 'แผนที่ดาวเทียม' : 'แผนที่ถนน';
         speak("สลับแผนที่ฐานเป็น" + mapType);
+    } else if (isShowDetails) {
+        const jobId = selectedJobId || lastSelectedJobId;
+        const job = findJobById(jobId);
+        if (job) {
+            selectedJobId = job.id;
+            viewJsonData();
+            speak("แสดงข้อมูลดิบ");
+        } else {
+            speak("กรุณาเลือกแปลงที่ดินก่อน");
+        }
     } else if (isFocusSearch) {
         const searchInput = document.getElementById('inp-search');
         if (searchInput) { searchInput.focus(); searchInput.select(); speak("ค้นหา"); }
@@ -1366,7 +1575,7 @@ async function deleteSurveyData() {
     });
 
     if (result.isConfirmed) {
-        const deleteFromCloud = result.value.deleteFromCloud;
+        const deleteFromCloud = (result.value && result.value.deleteFromCloud) || false;
 
         justDeletedJobId = job.id;
         selectedJobId = null;
@@ -2223,6 +2432,7 @@ function openSheet(job) {
     if (justDeletedJobId && job.id === justDeletedJobId) return;
 
     selectedJobId = job.id;
+    lastSelectedJobId = job.id;
     window.imagesToDeleteFromCloud = [];
     window.originalImagesBackup = job.properties.images ? JSON.parse(JSON.stringify(job.properties.images)) : [];
 
@@ -2514,7 +2724,7 @@ function viewJsonData() {
     sheet.style.zIndex = '1000';
     if (fabContainer) fabContainer.classList.remove('sheet-open');
 
-    let html = '<div class="text-left text-xs max-h-[60vh] overflow-y-auto"><table class="w-full border-collapse border border-gray-200 rounded-xl overflow-hidden">';
+    let html = '<div id="swal-raw-data-container" class="text-left text-xs max-h-[60vh] overflow-y-auto"><table class="w-full border-collapse border border-gray-200 rounded-xl overflow-hidden">';
     const sortedKeys = Object.keys(job.properties).sort();
     sortedKeys.forEach(k => {
         if (k !== 'images' && k !== 'name' && k !== 'note' && k !== 'date' && k !== 'search_field' && k !== 'amphoe' && k !== 'tambon' && k !== 'area') {
@@ -2535,7 +2745,10 @@ function viewJsonData() {
         width: '90%',
         confirmButtonText: 'ปิด',
         confirmButtonColor: '#4b5563',
-        allowOutsideClick: false
+        allowOutsideClick: false,
+        didClose: () => {
+            stopReadingSequence();
+        }
     }).then(() => {
         // Restore sheet state and default z-index
         sheet.style.zIndex = '';
