@@ -1939,7 +1939,7 @@ function openSheet(job) {
     sheet.classList.add('active');
     sheet.style.transform = '';
 
-    if (!isNavigating) map.flyTo([job.lat, job.lng], 16);
+    if (!isNavigating) map.flyTo([job.lat, job.lng], Math.max(map.getZoom(), 16));
 }
 
 function toggleInputs(enabled) {
