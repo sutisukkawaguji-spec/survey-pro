@@ -1114,13 +1114,14 @@ async function handleVoiceCommand(transcript) {
 
     const isShowPlot = cleanTranscript.includes("showplot") || cleanTranscript.includes("showplots") || cleanTranscript.includes("showboundary") || cleanTranscript.includes("showboundaries") || cleanTranscript.includes("plotmode") || cleanTranscript.includes("แสดงรูปแปลง") || cleanTranscript.includes("แสดงขอบเขตแปลง") || cleanTranscript.includes("แสดงแปลง") || cleanTranscript.includes("โหมดแปลง");
     const isShowPin = cleanTranscript.includes("showpin") || cleanTranscript.includes("showpins") || cleanTranscript.includes("showmarker") || cleanTranscript.includes("showmarkers") || cleanTranscript.includes("pinmode") || cleanTranscript.includes("แสดงหมุด") || cleanTranscript.includes("โหมดหมุด") || cleanTranscript.includes("ปักหมุด") || cleanTranscript.includes("สั่งแสดงหมุด") || cleanTranscript.includes("แสดงหมุดแผนที่");
+    const isToggleBaseMap = cleanTranscript.includes("switchmap") || cleanTranscript.includes("changemap") || cleanTranscript.includes("togglemap") || cleanTranscript.includes("switchbasemap") || cleanTranscript.includes("togglebasemap") || cleanTranscript.includes("สลับแผนที่") || cleanTranscript.includes("เปลี่ยนแผนที่") || cleanTranscript.includes("สลับแผนที่ฐาน") || cleanTranscript.includes("เปลี่ยนแผนที่ฐาน");
 
     const isClearNote = cleanTranscript.includes("clearnote") || cleanTranscript.includes("clearnotes") || cleanTranscript.includes("clearalltext") || cleanTranscript.includes("cleartext") || cleanTranscript.includes("ลบข้อความทั้งหมด") || cleanTranscript.includes("ลบหมายเหตุทั้งหมด") || cleanTranscript.includes("ลบข้อความ") || cleanTranscript.includes("ลบหมายเหตุ") || cleanTranscript.includes("ลบทั้งหมด") || cleanTranscript.includes("ล้างข้อความทั้งหมด") || cleanTranscript.includes("ล้างข้อความ") || cleanTranscript.includes("เคลียร์ข้อความทั้งหมด") || cleanTranscript.includes("เคลียร์ข้อความ") || cleanTranscript.includes("เคลียร์โน้ต") || cleanTranscript.includes("ลบโน้ต");
     const isCloseSheet = !cleanTranscript.includes("เปิด") && !cleanTranscript.includes("open") && (cleanTranscript.includes("closesheet") || cleanTranscript.includes("closedetails") || cleanTranscript.includes("closedetail") || cleanTranscript.includes("closebox") || cleanTranscript.includes("closewindow") || cleanTranscript.includes("cancel") || cleanTranscript.includes("ปิดบันทึก") || cleanTranscript.includes("ปิดกล่องบันทึก") || cleanTranscript.includes("ปิดกล่อง") || cleanTranscript.includes("ปิดรายละเอียด") || cleanTranscript.includes("ปิดหน้าต่าง") || cleanTranscript.includes("ยกเลิกบันทึก") || cleanTranscript.includes("ยกเลิกรายละเอียด") || (cleanTranscript.includes("ปิด") && !cleanTranscript.includes("ปิดป้ายชื่อ") && !cleanTranscript.includes("ปิดป้าย") && !cleanTranscript.includes("ปิดระบบ")) || (cleanTranscript.includes("ยกเลิก") && !cleanTranscript.includes("ยกเลิกการนำทาง") && !cleanTranscript.includes("ยกเลิกนำทาง")));
     const isFocusSearch = !cleanTranscript.includes("ลบ") && !cleanTranscript.includes("ล้าง") && (cleanTranscript.includes("ค้นหา") || cleanTranscript.includes("ช่องค้นหา") || cleanTranscript.includes("เปิดค้นหา") || cleanTranscript.includes("search"));
     const isNavigateSearchItem = (cleanTranscript.includes("รายการที่") || cleanTranscript.includes("รายการ")) && cleanTranscript.includes("เดินทาง");
 
-    const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
+    const isSurvey = !isSave && !isNext && !isCancelNav && !isDeleteSurvey && !isShowLabels && !isHideLabels && !isShowPlot && !isShowPin && !isToggleBaseMap && !isClearNote && !isCloseSheet && !isFocusSearch && !isNavigateSearchItem && (cleanTranscript.includes("survey") || cleanTranscript.includes("สำรวจ") || cleanTranscript.includes("เปิดบันทึก") || cleanTranscript.includes("เซอร์เวย์") || cleanTranscript.includes("เซอเวย์") || cleanTranscript.includes("เสวย"));
 
     if (isSurvey) {
         const job = findJobById(selectedJobId);
@@ -1183,6 +1184,10 @@ async function handleVoiceCommand(transcript) {
         if (viewMode !== 'original') { viewMode = 'original'; document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-draw-polygon"></i>'; renderMap(); speak("แสดงขอบเขตแปลงที่ดิน"); } else speak("แสดงขอบเขตแปลงอยู่แล้ว");
     } else if (isShowPin) {
         if (viewMode !== 'pin') { viewMode = 'pin'; document.getElementById('btn-view').innerHTML = '<i class="fa-solid fa-map-pin"></i>'; renderMap(); speak("แสดงหมุด"); } else speak("แสดงหมุดอยู่แล้ว");
+    } else if (isToggleBaseMap) {
+        toggleBaseMap();
+        const mapType = currentBaseMap === 'hybrid' ? 'แผนที่ดาวเทียม' : 'แผนที่ถนน';
+        speak("สลับแผนที่ฐานเป็น" + mapType);
     } else if (isFocusSearch) {
         const searchInput = document.getElementById('inp-search');
         if (searchInput) { searchInput.focus(); searchInput.select(); speak("ค้นหา"); }
