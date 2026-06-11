@@ -689,26 +689,17 @@ function initApp() {
             const removedLayer = e.layer;
             const jobId = removedLayer.jobId;
             if (jobId) {
-                // ตรวจสอบว่าเป็นจุดที่วาดใหม่ในคิวชั่วคราวหรือไม่
-                const newShapeIndex = window.pendingNewShapes.findIndex(x => x.id === jobId);
-                if (newShapeIndex !== -1) {
-                    window.pendingNewShapes.splice(newShapeIndex, 1);
-                    window.pendingGeomanUpdates.delete(jobId);
-                    removedLayer.remove();
-                    if (selectedJobId === jobId) {
-                        closeSheet();
-                    }
-                    showPendingActionsBar();
-                    return;
-                }
-
                 const job = findJobById(jobId);
                 if (job) {
                     selectedJobId = jobId;
                     await deleteJob();
                     // หากไม่ได้ทำการลบจริง (เช่น กดยกเลิก) ให้แสดงผลแผนที่ใหม่เพื่อคืนค่าเลเยอร์กลับมา
                     if (findJobById(jobId)) {
-                        renderMap();
+                        if (job.properties && job.properties.is_temp === true) {
+                            removedLayer.addTo(map);
+                        } else {
+                            renderMap();
+                        }
                     }
                 }
             }
@@ -2668,6 +2659,18 @@ async function deleteJob() {
 
     // Check if temporary drawn shape
     if (job.properties && job.properties.is_temp === true) {
+        const confirm = await Swal.fire({
+            title: 'ยืนยันการลบรูปแปลงที่วาดใหม่?',
+            text: 'คุณต้องการลบหรือยกเลิกการวาดรูปแปลงนี้ใช่หรือไม่?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonColor: '#ef4444',
+            confirmButtonText: 'ยืนยันการลบ',
+            cancelButtonText: 'ยกเลิก'
+        });
+
+        if (!confirm.isConfirmed) return;
+
         // Revoke temporary image blobs
         if (job.properties.images) {
             job.properties.images.forEach(img => {
@@ -3405,6 +3408,44 @@ async function deleteImportedMap(source, category) {
     });
 
     if (!result.isConfirmed) return;
+
+    const pwdResult = await Swal.fire({
+        title: 'ยืนยันความปลอดภัย',
+        text: 'กรุณากรอกรหัสผ่านบัญชีของคุณเพื่อยืนยันการลบแผนที่นำเข้า',
+        input: 'password',
+        inputPlaceholder: 'รหัสผ่านของคุณ',
+        showCancelButton: true,
+        confirmButtonColor: '#ef4444',
+        confirmButtonText: 'ยืนยันรหัสผ่านเพื่อลบ',
+        cancelButtonText: 'ยกเลิก',
+        inputAttributes: {
+            autocapitalize: 'off',
+            autocorrect: 'off'
+        }
+    });
+
+    if (!pwdResult.isConfirmed) return;
+
+    const password = pwdResult.value;
+    if (!password) {
+        return Swal.fire('ผิดพลาด', 'กรุณากรอกรหัสผ่านเพื่อดำเนินการต่อ', 'error');
+    }
+
+    showLoading(true, 'กำลังตรวจสอบความถูกต้อง...');
+    try {
+        const currentEmail = currentUser.email;
+        if (!currentEmail) throw new Error("ไม่พบอีเมลผู้ใช้งานปัจจุบัน");
+
+        const { error: authError } = await supabaseClient.auth.signInWithPassword({
+            email: currentEmail,
+            password: password
+        });
+
+        if (authError) throw new Error("รหัสผ่านไม่ถูกต้อง");
+    } catch (e) {
+        showLoading(false);
+        return Swal.fire('ทำรายการไม่สำเร็จ', e.message, 'error');
+    }
 
     showLoading(true, 'กำลังลบแผนที่นำเข้า...');
 
