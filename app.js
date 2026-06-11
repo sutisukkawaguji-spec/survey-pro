@@ -1405,14 +1405,18 @@ async function handleVoiceCommand(transcript) {
 
     if (isSurvey) {
         let job = null;
-        if (userMarker) {
-            job = findJobContainingUser();
-        }
-        if (!job) {
+        if (isNavigating) {
             job = findJobById(selectedJobId);
         } else {
-            if (selectedJobId !== job.id) {
-                openSheet(job);
+            if (userMarker) {
+                job = findJobContainingUser();
+            }
+            if (!job) {
+                job = findJobById(selectedJobId);
+            } else {
+                if (selectedJobId !== job.id) {
+                    openSheet(job);
+                }
             }
         }
 
