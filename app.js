@@ -221,6 +221,8 @@ async function checkAuthSession() {
                        window.location.hash.includes('recovery') || 
                        window.location.search.includes('type=recovery');
 
+    const hasAuthError = window.location.hash.includes('error=') || window.location.search.includes('error=');
+
     if (!initSupabase()) {
         showAuthOverlay(true);
         return;
@@ -228,6 +230,22 @@ async function checkAuthSession() {
 
     showLoading(true, 'กำลังยืนยันตัวตน...');
     try {
+        if (hasAuthError) {
+            // ล้าง hash และ query parameters เพื่อไม่ให้ค้างบน URL
+            const cleanUrl = window.location.href.split('#')[0].split('?')[0];
+            window.history.replaceState(null, null, cleanUrl);
+            
+            showLoading(false);
+            await Swal.fire({
+                title: 'ลิงก์หมดอายุหรือผิดพลาด',
+                text: 'ลิงก์รีเซ็ตรหัสผ่านนี้หมดอายุ หรืออาจจะเคยถูกใช้งานไปแล้ว (ลิงก์กู้คืนสามารถใช้งานได้เพียงครั้งเดียวเท่านั้น) กรุณากด "ลืมรหัสผ่าน?" หน้าเข้าสู่ระบบเพื่อรับลิงก์ใหม่อีกครั้งครับ',
+                icon: 'error',
+                confirmButtonText: 'ตกลง'
+            });
+            showAuthOverlay(true);
+            return;
+        }
+
         const { data: { session }, error } = await supabaseClient.auth.getSession();
 
         if (isRecovery && session && session.user) {
