@@ -172,7 +172,54 @@ async function handleAuthSubmit(e) {
 window.handleAuthSubmit = handleAuthSubmit;
 window._appHandleAuthSubmit = handleAuthSubmit;
 
+async function handleForgotPassword() {
+    if (!initSupabase()) {
+        Swal.fire('ยังไม่ได้ตั้งค่าเชื่อมต่อ', 'กรุณาระบุ Anon Key ในซอร์สโค้ดเพื่อเริ่มต้นใช้งาน', 'warning');
+        return;
+    }
+
+    const emailInput = document.getElementById('auth-email').value.trim();
+
+    const { value: email } = await Swal.fire({
+        title: 'ลืมรหัสผ่าน',
+        text: 'กรุณากรอกอีเมลของคุณเพื่อรับลิงก์ตั้งรหัสผ่านใหม่',
+        input: 'email',
+        inputValue: emailInput,
+        inputPlaceholder: 'yourname@email.com',
+        showCancelButton: true,
+        confirmButtonText: 'ส่งลิงก์รีเซ็ต',
+        cancelButtonText: 'ยกเลิก',
+        inputValidator: (value) => {
+            if (!value) {
+                return 'กรุณากรอกอีเมล!';
+            }
+        }
+    });
+
+    if (email) {
+        showLoading(true, 'กำลังส่งอีเมลรีเซ็ตรหัสผ่าน...');
+        try {
+            const redirectUrl = window.location.origin + window.location.pathname;
+            const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+                redirectTo: redirectUrl
+            });
+            if (error) throw error;
+            Swal.fire('ส่งสำเร็จ', 'ระบบได้ส่งลิงก์ตั้งรหัสผ่านใหม่ไปยังอีเมลของคุณแล้ว กรุณาตรวจสอบกล่องจดหมาย (และอีเมลขยะ/Spam)', 'success');
+        } catch (err) {
+            Swal.fire('เกิดข้อผิดพลาด', err.message, 'error');
+        } finally {
+            showLoading(false);
+        }
+    }
+}
+window.handleForgotPassword = handleForgotPassword;
+
 async function checkAuthSession() {
+    // ดักจับ hash ก่อนที่ initSupabase (supabase.createClient) จะเคลียร์ hash ออกจาก URL
+    const isRecovery = window.location.hash.includes('type=recovery') || 
+                       window.location.hash.includes('recovery') || 
+                       window.location.search.includes('type=recovery');
+
     if (!initSupabase()) {
         showAuthOverlay(true);
         return;
@@ -181,6 +228,45 @@ async function checkAuthSession() {
     showLoading(true, 'กำลังยืนยันตัวตน...');
     try {
         const { data: { session }, error } = await supabaseClient.auth.getSession();
+
+        if (isRecovery && session && session.user) {
+            // ล้าง hash และ query parameters เพื่อความปลอดภัยและป้องกันกล่องแจ้งเตือนทำงานซ้ำตอนรีเฟรช
+            const cleanUrl = window.location.href.split('#')[0].split('?')[0];
+            window.history.replaceState(null, null, cleanUrl);
+
+            showLoading(false); // ปิดหน้าต่างโหลดชั่วคราว
+            const { value: newPassword } = await Swal.fire({
+                title: 'ตั้งรหัสผ่านใหม่',
+                text: 'กรุณากรอกรหัสผ่านใหม่ที่คุณต้องการใช้งาน',
+                input: 'password',
+                inputPlaceholder: 'รหัสผ่านใหม่ (อย่างน้อย 6 ตัวอักษร)',
+                showCancelButton: false,
+                confirmButtonText: 'บันทึกรหัสผ่านใหม่',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                inputValidator: (value) => {
+                    if (!value) {
+                        return 'กรุณากรอกรหัสผ่าน!';
+                    }
+                    if (value.length < 6) {
+                        return 'รหัสผ่านต้องมีความยาวอย่างน้อย 6 ตัวอักษร!';
+                    }
+                }
+            });
+
+            if (newPassword) {
+                showLoading(true, 'กำลังอัปเดตรหัสผ่านใหม่...');
+                const { error: updateError } = await supabaseClient.auth.updateUser({ password: newPassword });
+                showLoading(false);
+                if (updateError) {
+                    await Swal.fire('ผิดพลาด', 'ไม่สามารถอัปเดตรหัสผ่านได้: ' + updateError.message, 'error');
+                } else {
+                    await Swal.fire('สำเร็จ', 'อัปเดตรหัสผ่านใหม่เรียบร้อยแล้ว ยินดีต้อนรับเข้าสู่ระบบ', 'success');
+                }
+            }
+            showLoading(true, 'กำลังเข้าสู่ระบบ...');
+        }
+
         if (session && session.user) {
             await loadUserProfileAndData(session.user);
         } else {
