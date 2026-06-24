@@ -213,6 +213,7 @@ async function handleForgotPassword() {
     }
 }
 window.handleForgotPassword = handleForgotPassword;
+window._appHandleForgotPassword = handleForgotPassword;
 
 async function checkAuthSession() {
     // ดักจับ hash ก่อนที่ initSupabase (supabase.createClient) จะเคลียร์ hash ออกจาก URL

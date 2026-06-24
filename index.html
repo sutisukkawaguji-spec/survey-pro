@@ -1182,6 +1182,14 @@
                 alert('\u0e23\u0e30\u0e1a\u0e1a\u0e22\u0e31\u0e07\u0e42\u0e2b\u0e25\u0e14\u0e44\u0e21\u0e48\u0e40\u0e2a\u0e23\u0e47\u0e08 \u0e01\u0e23\u0e38\u0e13\u0e32\u0e23\u0e2d\u0e2a\u0e31\u0e01\u0e04\u0e23\u0e39\u0e48\u0e41\u0e25\u0e49\u0e27\u0e25\u0e2d\u0e07\u0e43\u0e2b\u0e21\u0e48');
             }
         }
+
+        function handleForgotPassword() {
+            if (typeof window._appHandleForgotPassword === 'function') {
+                window._appHandleForgotPassword();
+            } else {
+                alert('ระบบยังโหลดไม่เสร็จ หรือโปรดเคลียร์แคชเบราว์เซอร์แล้วลองใหม่อีกครั้ง');
+            }
+        }
     </script>
 
     <!-- Auth Glassmorphism Overlay -->
@@ -1721,7 +1729,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=1.0.28" charset="UTF-8"></script>
+    <script src="app.js?v=1.0.29" charset="UTF-8"></script>
 </body>
 
 </html>
